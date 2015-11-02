@@ -1,9 +1,7 @@
-switch(Sys.info()[["sysname"]], 
-       "Linux" = setwd("/media/fdetsch/XChange/kilimanjaro/evapotranspiration/"), 
-       "Windows" = setwd("D:/kilimanjaro/evapotranspiration/"))
+setwd("/media/fdetsch/modis_data/radiation_model")
 
 lib <- c("raster", "rgdal", "doParallel")
-sapply(lib, function(x) library(x, character.only = TRUE))
+jnk <- sapply(lib, function(x) library(x, character.only = TRUE))
 
 registerDoParallel(cl <- makeCluster(3))
 
@@ -123,26 +121,47 @@ plot(tmp)
 
 ## R_lu (longwave upward radiation)
 
+st <- "2012"
+nd <- "2012"
+
 # NDVI
-ndvi.fls <- list.files("myd09gq/processed/", pattern = "^NDVI", 
+ndvi.fls.terra <- list.files("data/MOD13Q1.006/whittaker", pattern = ".tif$", 
                        full.names = TRUE)
+
+ndvi.fls.terra <- ndvi.fls.terra[grep(st, ndvi.fls.terra)[1]:grep(nd, ndvi.fls.terra)[length(grep(nd, ndvi.fls.terra))]]
+
+ndvi.fls.aqua <- list.files("data/MYD13Q1.006/whittaker", pattern = ".tif$", 
+                             full.names = TRUE)
+
+ndvi.fls.aqua <- ndvi.fls.aqua[grep(st, ndvi.fls.aqua)[1]:grep(nd, ndvi.fls.aqua)[length(grep(nd, ndvi.fls.aqua))]]
+
+ndvi.fls <- c(ndvi.fls.terra, ndvi.fls.aqua)
+ndvi.fls <- ndvi.fls[order(substr(basename(ndvi.fls), 5, 11))]
+
 ndvi <- stack(ndvi.fls)
 
+ndvi_rsmpl <- resample(ndvi, lai[[1]], filename = "data/MCD13Q1.006/rsmpl/RSMPL", 
+                       bylayer = TRUE, suffix = names(ndvi), format = "GTiff", 
+                       overwrite = TRUE)
+
 # LAI
-lai <- stack("model_input/lai_13.tif")
+lai.fls <- list.files("data/lai_rsmpl", pattern = "^COMB.*.tif", 
+                      full.names = TRUE)
+lai.fls <- lai.fls[grep(st, lai.fls)[1]:grep(nd, lai.fls)[length(grep(nd, lai.fls))]]
+lai <- stack(lai.fls)
 
 # sigma (Stefan-Boltzmann constant, 5.67 * 10^(-8) Wm^(-2)K^(-4))
 sigma <- 5.67 * 10^(-8)
 
 # lst (land surface temperature)
-lst.fls <- list.files("md11a1/processed/", 
-                      pattern = "^RSMPL_AGG1MTH_.*LST_Day_1km.tif$", 
+lst.fls <- list.files("data/MCD11A2/rsmpl/", pattern = "^RSMPL.*.tif$", 
                       full.names = TRUE)
+lst.fls <- lst.fls[grep(st, lst.fls)[1]:grep(nd, lst.fls)[length(grep(nd, lst.fls))]]
 lst <- stack(lst.fls)
 
 # epsilon_s (broadband surface emissivity)
-epsilon.s <- stack(lapply(seq_len(nlayers(ndvi)), function(i) {
-  x <- ndvi[[i]]
+epsilon.s <- stack(lapply(seq_len(nlayers(ndvi_rsmpl)), function(i) {
+  x <- ndvi_rsmpl[[i]] / 10000
   y <- lai[[i]]
 
   x[x[] > 0 & y[] <= 3] <- 0.95 + 0.01 * y[x[] > 0 & y[] <= 3]
