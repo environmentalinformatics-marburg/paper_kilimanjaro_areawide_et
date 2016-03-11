@@ -80,7 +80,8 @@ prm <- c("Solar_Zenith", "Skin_Temperature", "Surface_Pressure",
 for (product in c("MOD07_L2.006", "MYD07_L2.006")) {
   
   ## discard scenes not covering reference extent
-  fls <- list.files(paste0("data/", product), full.names = TRUE)
+  fls <- list.files(paste0("data/", product), pattern = ".hdf$", 
+                    full.names = TRUE)
   
   # lst_ext <- list()
   # for (i in 1:length(fls)) {
@@ -101,6 +102,10 @@ for (product in c("MOD07_L2.006", "MYD07_L2.006")) {
   
   fls <- fls[inside]
   ext <- lst_ext[inside]
+  
+  lst_out <- getAtmosProfParam(fls[1:10], prm = "Surface_Elevation", ext = rst_kili, 
+                               dsn = "data/MYD07_L2.006", verbose = TRUE, 
+                               cores = 3L)
   
   ## loop over files
   lst_out <- foreach(h = as.list(fls), g = ext) %do% {
@@ -127,7 +132,6 @@ for (product in c("MOD07_L2.006", "MYD07_L2.006")) {
       
       # identify relevant sds
       sds_prm <- sds[grep(i, sds)[1]]
-      id <- as.numeric(strsplit(strsplit(sds_prm, "=")[[1]][1], "_")[[1]][2])
       sds_prm <- sapply(strsplit(sds_prm, "="), "[[", 2)
       
       # retrieve scale and offset of current parameter
