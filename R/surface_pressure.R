@@ -136,21 +136,56 @@ if (!dir.exists(dir_sp)) dir.create(dir_sp)
 ## loop over days
 lst_sp <- foreach(i = lst_gp, j = lst_ta, k = fls_sp, 
                   .packages = "raster") %dopar% {
+             
+  if (file.exists(k)) {
+    raster::raster(k)
+  } else {  
                     
-  mat_gp <- raster::as.matrix(i)
-  mat_ta <- raster::as.matrix(j)
-  
-  num_sp <- sapply(1:nrow(mat_gp), function(l) {
-    z <- rst_dem[l]
-    gp <- mat_gp[l, ]
-    ta <- mat_ta[l, ]
+    mat_gp <- raster::as.matrix(i)
+    mat_ta <- raster::as.matrix(j)
     
-    if (is.na(z) | any(is.na(gp)))
-      return(NA)
+    num_sp <- sapply(1:nrow(mat_gp), function(l) {
+      z <- rst_dem[l]
+      gp <- mat_gp[l, ]
+      ta <- mat_ta[l, ]
+      
+      if (is.na(z) | any(is.na(gp)))
+        return(NA)
+      
+      barometricFormula(z, gp, ta, p_levels)
+    })
     
-    barometricFormula(z, gp, ta, p_levels)
-  })
-  
-  rst_sp <- raster::setValues(rst_tmp, num_sp)
-  raster::writeRaster(rst_sp, k, format = "GTiff", overwrite = TRUE)
+    rst_sp <- raster::setValues(rst_tmp, num_sp)
+    raster::writeRaster(rst_sp, k, format = "GTiff", overwrite = TRUE)
+  }
 }
+
+rst_sp <- stack(lst_sp)
+
+## aggregate 8-day intervals
+dts_sp <- sapply(fls_sp, function(i) substr(basename(i), 1, 7))
+dts_sp <- as.Date(dts_sp, "%Y%j")
+
+lst_agg <- foreach(i = 2013:2015, .combine = "c", .packages = "raster") %dopar% {
+  
+  # output folder and files
+  id <- grep(paste0("^", i), dts_sp)
+  
+  timestamps <- strftime(as.Date(levels(cut(dts_sp[id], "8 days"))), "%Y%j")
+  fls_agg <- fls_sp[sapply(timestamps, function(j) grep(j, unlist(fls_sp)))]
+  dir_agg <- paste0(unique(dirname(unlist(fls_agg))), "/agg")
+  if (!dir.exists(dir_agg)) dir.create(dir_agg)
+  fls_agg <- basename(unlist(fls_agg))
+  
+  # aggregate
+  indices <- as.numeric(cut(dts_sp[id], "8 days"))
+  
+  raster::stackApply(rst_sp[[id]], indices = indices, fun = "mean", 
+                     filename = paste0(dir_agg, "/AGG"), bylayer = TRUE, 
+                     suffix = fls_agg, format = "GTiff", overwrite = TRUE)
+}
+
+rst_agg <- stack(lst_agg)
+
+## deregister parallel backend
+stopCluster(cl)
