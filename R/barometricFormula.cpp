@@ -2,6 +2,7 @@
 using namespace Rcpp;
 
 //// difference -----
+//// calculate absolute difference between dem and geopotential heights
 // [[Rcpp::export]]
 NumericVector difference(double x, NumericVector y) {
   
@@ -62,7 +63,7 @@ int whichMin(NumericVector x) {
     i++;
   }
   
-  return i;
+  return i - 1;
 }
 
 //// barometric formula -----
@@ -71,13 +72,23 @@ int whichMin(NumericVector x) {
 double barometricFormula(double z, NumericVector gp, NumericVector ta, 
                          IntegerVector p) {
   
+  // identify minimum difference between dem and geopotential heights
   NumericVector differences = difference(z, gp);
   int id = whichMin(differences);
 
-  double h0, h1, t, p0;
+  // if subsequent geopotential is NA, automatically use 1st algorithm 
+  bool isna = (gp[id + 1] != gp[id + 1]);
+  bool smallerThan = false;
 
-  bool isna = isNA(gp[id + 1]);
-  if ((differences[id - 1] < differences[id + 1]) | isna) {
+  if (isna) {
+    smallerThan = true;
+  } else {
+    smallerThan = differences[id - 1] < differences[id + 1];
+  }
+  
+  // base elevation, pressure, and temperature
+  double h0, h1, t, p0;
+  if (smallerThan) {
     h0 = gp[id];
     h1 = z;
     t = ta[id];
@@ -89,6 +100,7 @@ double barometricFormula(double z, NumericVector gp, NumericVector ta,
     p0 = p[id + 1];
   }
 
+  // calculate pressure at z-level
   double dh, g, M, R;
 
   dh = h1 - h0;
@@ -103,17 +115,25 @@ double barometricFormula(double z, NumericVector gp, NumericVector ta,
 }
 
 //// run barometric formula on matrix
+// [[Rcpp::export]]
 NumericVector run_barometricFormula(NumericMatrix a, NumericMatrix b, 
                                     NumericVector dem, IntegerVector p) {
   
   int nRows = a.nrow(), nCols = a.ncol();
   NumericVector out(nRows);
   
+  NumericVector gp(nCols), ta(nCols);
+
   for (int i = 0; i < nRows; i++) {
-    NumericVector gp = a(i, _);
-    NumericVector ta = b(i, _);
-    
-    out[i] = barometricFormula(dem[i], gp, ta, p);
+
+    gp = a(i, _);
+    ta = b(i, _);
+
+    if (all(is_na(gp)) | all(is_na(ta))) {
+      out[i] = -999;
+    } else {
+      out[i] = barometricFormula(dem[i], gp, ta, p);
+    }
   }
   
   return out;

@@ -4,7 +4,8 @@
 rm(list = ls(all = TRUE))
 
 ## source functions
-source("R/barometricFormula.R")
+library(Rcpp)
+sourceCpp("R/barometricFormula.cpp")
 
 ## set working directory
 Orcs::setwdOS(path_lin = "/media/fdetsch/XChange/", path_win = "D:/",
@@ -29,6 +30,7 @@ rst_dem <- resample(rst_dem, rst_ref)
 
 rst_ref <- trim(projectRaster(rst_ref, crs = "+init=epsg:4326"))
 rst_dem <- trim(projectRaster(rst_dem, crs = "+init=epsg:4326"))
+num_dem <- getValues(rst_dem)
 
 ## list and import temperature files
 fls_ta <- list.files("data/MOD07_L2.006/Retrieved_Temperature_Profile", 
@@ -58,29 +60,18 @@ if (!dir.exists(unique(dirname(fls_sp)))) dir.create(unique(dirname(fls_sp)))
 
 ## loop over scenes
 lst_sp <- foreach(i = lst_gp, j = lst_ta, k = as.list(fls_sp), 
-                  .packages = "raster") %dopar% {
+                  .packages = c("raster", "Rcpp")) %dopar% {
   
   if (!(all(is.na(raster::maxValue(i))) | all(is.na(raster::maxValue(j))))) {
     if (file.exists(k)) {
       raster::raster(k)
     } else {  
       
-      mat_gp <- raster::as.matrix(i)
-      mat_ta <- raster::as.matrix(j)
-      
-      num_sp <- sapply(1:nrow(mat_gp), function(l) {
-        z <- rst_dem[l]
-        gp <- mat_gp[l, ]
-        ta <- mat_ta[l, ]
-        
-        if (is.na(z) | all(is.na(gp)))
-          return(NA)
-        
-        barometricFormula(z, gp, ta, p)
-      })
-      
-      rst_sp <- raster::setValues(rst_tmp, num_sp)
-      raster::writeRaster(rst_sp, k, format = "GTiff", overwrite = TRUE)
+      raster::overlay(i, j, fun = function(x, y, ...) {
+        val <- run_barometricFormula(x[], y[], num_dem, p)
+        val[val == -999] <- NA
+        return(val)
+      }, unstack = FALSE, filename = k, format = "GTiff", overwrite = TRUE)
     }
   }
 }
