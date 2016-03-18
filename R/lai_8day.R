@@ -92,7 +92,7 @@ lst_qc1 <- foreach(i = 1:nlayers(rst_crp[[1]]), .packages = lib) %dopar%
         bin <- number2binary(k, 8, TRUE)
         modland <- substr(bin, 8, 8) == "0"
         cloud_state <- substr(bin, 4, 5) == "00"
-        confidence <- rev(substr(bin, 1, 3)) %in% c("000", "001")
+        confidence <- substr(bin, 1, 3) %in% c("000", "001")
 
         all(modland, cloud_state, confidence)
       })
