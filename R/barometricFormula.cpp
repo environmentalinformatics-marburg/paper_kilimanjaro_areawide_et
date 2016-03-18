@@ -15,6 +15,7 @@ NumericVector difference(double x, NumericVector y) {
 }
 
 //// is.na() -----
+//// (taken from http://gallery.rcpp.org/articles/working-with-missing-values/)
 // [[Rcpp::export]]
 LogicalVector isNA(NumericVector x) {
   int n = x.size();
@@ -26,69 +27,94 @@ LogicalVector isNA(NumericVector x) {
   return out;
 }
 
-//// which.min() -----
+//// na.omit() -----
+//// (taken from http://stackoverflow.com/questions/19156353/remove-na-values-efficiently)
 // [[Rcpp::export]]
-NumericVector whichMin(NumericVector x) {
-  
+NumericVector naOmit(NumericVector x) {
   int len = x.size();
-  bool isna, out = FALSE;
-
+  std::vector<double> out(len);
+  
   int n = 0;
-  NumericVector tmp;
   for (int i = 0; i < len; i++) {
-    isna = isNA(x[i]);
-    if (!isna) {
-      tmp[n] = x[i];
-      n += 1;
+    if (x[i] == x[i]) {
+      out[n] = x[i];
+      n++;
     }
   }
   
-  // int i = 0;
-  // while (!out | i == 0) {
-  //   std::cout << i << "\n";
-  //   isna = isNA(x[i]);
-  //   if (!isna)
-  //     out = (min(x) == x[i]);
-  //   i++;
-  // }
+  out.resize(n);
+  return Rcpp::wrap(out);
+}
+
+//// which.min() -----
+// [[Rcpp::export]]
+int whichMin(NumericVector x) {
   
-  return tmp;
+  int len = x.size();
+  
+  NumericVector y(len);
+  y = naOmit(x);
+  
+  bool out = false;
+  int i = 0;
+  while ((!out) | (i == 0)) {
+    out = (min(y) == x[i]);
+    i++;
+  }
+  
+  return i;
 }
 
 //// barometric formula -----
+//// (taken from https://en.wikipedia.org/wiki/Barometric_formula)
 // [[Rcpp::export]]
-int barometricFormula(double z, NumericVector gp, NumericVector ta, 
+double barometricFormula(double z, NumericVector gp, NumericVector ta, 
                          IntegerVector p) {
   
   NumericVector differences = difference(z, gp);
   int id = whichMin(differences);
 
-  // double h0, h1, t, p0;
-  // 
-  // bool isna = isNA(gp[id + 1]);
-  // if ((differences[id - 1] < differences[id + 1]) | isna) {
-  //   h0 = gp[id];
-  //   h1 = z;
-  //   t = ta[id];
-  //   p0 = p[id];
-  // } else {
-  //   h0 = gp[id + 1];
-  //   h1 = z;
-  //   t = ta[id + 1];
-  //   p0 = p[id + 1];
-  // }
-  // 
-  // // apply barometric formula, directly taken from 
-  // // https://en.wikipedia.org/wiki/Barometric_formula
-  // double dh, g, M, R;
-  // 
-  // dh = h1 - h0;
-  // g = 9.80665;
-  // M = 0.0289644;
-  // R = 8.31432;
-  // 
-  // double out;
-  // out = p0 * exp((-1) * (g * M * dh) / (R * (t + 273.15)));
+  double h0, h1, t, p0;
+
+  bool isna = isNA(gp[id + 1]);
+  if ((differences[id - 1] < differences[id + 1]) | isna) {
+    h0 = gp[id];
+    h1 = z;
+    t = ta[id];
+    p0 = p[id];
+  } else {
+    h0 = gp[id + 1];
+    h1 = z;
+    t = ta[id + 1];
+    p0 = p[id + 1];
+  }
+
+  double dh, g, M, R;
+
+  dh = h1 - h0;
+  g = 9.80665;
+  M = 0.0289644;
+  R = 8.31432;
+
+  double out;
+  out = p0 * exp((-1) * (g * M * dh) / (R * (t + 273.15)));
   
-  return id;
+  return out;
+}
+
+//// run barometric formula on matrix
+NumericVector run_barometricFormula(NumericMatrix a, NumericMatrix b, 
+                                    NumericVector dem, IntegerVector p) {
+  
+  int nRows = a.nrow(), nCols = a.ncol();
+  NumericVector out(nRows);
+  
+  for (int i = 0; i < nRows; i++) {
+    NumericVector gp = a(i, _);
+    NumericVector ta = b(i, _);
+    
+    out[i] = barometricFormula(dem[i], gp, ta, p);
+  }
+  
+  return out;
 }
