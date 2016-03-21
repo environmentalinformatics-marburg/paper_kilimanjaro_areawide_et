@@ -1,122 +1,168 @@
-setwd("/media/fdetsch/modis_data/radiation_model")
+### environment ----------------------------------------------------------------
 
-lib <- c("raster", "rgdal", "doParallel")
-jnk <- sapply(lib, function(x) library(x, character.only = TRUE))
+## clear workspace
+rm(list = ls(all = TRUE))
 
-registerDoParallel(cl <- makeCluster(3))
+## load packages
+lib <- c("reset", "satellite", "doParallel")
+Orcs::loadPkgs(lib)
+
+## set working directory
+Orcs::setwdOS(path_lin = "/media/fdetsch/XChange/", path_win = "D:/",
+              path_ext = "kilimanjaro/evapotranspiration/")
+
+## parallelization
+cl <- makeCluster(detectCores() - 1)
+registerDoParallel(cl)
+
+## reference extent
+rst_ref_utm <- raster("data/MYD09Q1.006/ndvi/NDVI_MYD09Q1.A2013001.sur_refl.tif")
+rst_ref <- trim(projectRaster(rst_ref_utm, crs = "+init=epsg:4326"))
 
 
-## R_sd (shortwave downward radiation)
+### atmospheric transmissivity -----
 
-# G_sc (solar constant, 1367 Wm^(-2))
-g.sc  <- 1367
+## solar zenith angle
+fls_theta <- list.files("data/MOD05_L2.006/Solar_Zenith", full.names = TRUE, 
+                        pattern = "Solar_Zenith.tif$")
 
-# theta (solar incidence angle, i.e. solar zenith angle)
-theta.fls <- list.files("md07/processed/", pattern = "^CRP_.*Solar_Zenith.tif$", 
-                        full.names = TRUE)
+dts_theta <- substr(basename(fls_theta), 11, 22)
+dat_theta <- data.frame(datetime = dts_theta, theta = fls_theta, 
+                        stringsAsFactors = FALSE)
 
-theta.fls.split <- strsplit(basename(theta.fls), "\\.")
-theta.fls.date <- as.Date(gsub("A", "", sapply(theta.fls.split, "[[", 2)), "%Y%j")
-theta.fls.time <- sapply(theta.fls.split, "[[", 3)
+## precipitable water content
+fls_ptw <- list.files("data/MOD05_L2.006/Water_Vapor_Near_Infrared/res", 
+                      full.names = TRUE, pattern = "Near_Infrared.tif$")
 
-theta.index.day <- as.numeric(theta.fls.time) >= 600 &
-  as.numeric(theta.fls.time) <= 1800
-# theta.day <- which(theta.index.day)
-# theta.night <- which(!theta.index.day)
+# # merge replicate daily scenes
+# dts_ptw <- MODIS::extractDate(fls_ptw, 23, 29, asDate = TRUE)$inputLayerDates
+# fct_ptw <- as.numeric(as.factor(dts_ptw))
+# rst_ptw <- stackApply(rst_ptw, indices = fct_ptw, fun = mean)
+# 
+# dir_dly <- paste0(unique(dirname(fls_ptw)), "/daily/")
+# if (!dir.exists(dir_dly)) dir.create(dir_dly)
+# fls_dly <- paste0(dir_dly, "Surface_Pressure_", strftime(dts_ptw, "%Y%j"), ".tif")
+# lst_ptw <- foreach(i = 1:nlayers(rst_ptw), .packages = "raster") %dopar% {
+#   if (file.exists(fls_dly[i])) {
+#     raster(fls_dly[i])
+#   } else {
+#     writeRaster(rst_ptw[[i]], filename = fls_dly[i], 
+#                 format = "GTiff", overwrite = TRUE)
+#   }
+# }
+# rst_ptw <- stack(lst_ptw)
 
-theta.fls.day <- theta.fls[theta.index.day]
+dts_ptw <- substr(basename(fls_ptw), 23, 34)
+dat_ptw <- data.frame(datetime = dts_ptw, precipitable = fls_ptw, 
+                      stringsAsFactors = FALSE)
 
-df.theta.fls.day <- data.frame(date = theta.fls.date[theta.index.day], 
-                               theta.fls.day, stringsAsFactors = FALSE)
+## air pressure
 
-# p (surface pressure from MODIS)
-p.fls <- list.files("md07/processed/", pattern = "^CRP_.*Surface_Pressure.tif$", 
-                    full.names = TRUE)
+# import available files
+fls_sp <- list.files("data/MOD07_L2.006/Surface_Pressure", full.names = TRUE, 
+                     pattern = "Surface_Pressure.tif$")
 
-p.fls.split <- strsplit(basename(p.fls), "\\.")
-p.fls.date <- as.Date(gsub("A", "", sapply(p.fls.split, "[[", 2)), "%Y%j")
-p.fls.time <- sapply(p.fls.split, "[[", 3)
+dts_sp <- substr(basename(fls_sp), 11, 22)
+dat_sp <- data.frame(datetime = dts_sp, pressure = fls_sp, 
+                     stringsAsFactors = FALSE)
 
-p.index.day <- as.numeric(p.fls.time) >= 600 &
-  as.numeric(p.fls.time) <= 1800
-# p.day <- which(p.index.day)
-# p.night <- which(!p.index.day)
+## compute atmospheric transmissivity for each complete scene
+dat_tau <- Reduce(function(...) merge(..., all = TRUE, by = "datetime"), 
+                  list(dat_sp, dat_theta, dat_ptw))
 
-p.fls.day <- p.fls[p.index.day]
+dat_tau <- dat_tau[complete.cases(dat_tau), ]
 
-p <- stack(p.fls.day)
-p <- p * 0.1 # hPa -> kPa
-
-# p (surface pressure from ECMWF)
-p.fls <- list.files("ecmwf/", pattern = "^DLY.*surface_pressure.*.tif$", 
-                    full.names = TRUE)
-
-p.fls.split <- strsplit(basename(p.fls), "_")
-p.fls.date <- as.Date(sapply(p.fls.split, "[[", 6), "%Y%j")
-
-df.p.fls <- data.frame(date = p.fls.date, p.fls, stringsAsFactors = FALSE)
-
-k.t <- 1
-
-# W (atmospheric water content)
-w.fls <- list.files("md07/processed/", pattern = "^CRP_.*Water_Vapor.tif$", 
-                    full.names = TRUE)
-
-w.fls.split <- strsplit(basename(w.fls), "\\.")
-w.fls.date <- as.Date(gsub("A", "", sapply(w.fls.split, "[[", 2)), "%Y%j")
-w.fls.time <- sapply(strsplit(basename(w.fls), "\\."), "[[", 3)
-w.index.day <- as.numeric(w.fls.time) >= 600 & as.numeric(w.fls.time) <= 1800
-w.day <- which(w.index.day)
-w.night <- which(!w.index.day)
-
-w.fls.day <- w.fls[w.day]
-
-df.w.fls.day <- data.frame(date = w.fls.date[w.day], 
-                           w.fls.day, stringsAsFactors = FALSE)
-
-# Continuous data.frame with corresponding theta, w and p files
-df.seq <- data.frame(date = seq(as.Date("2013-01-01"), as.Date("2013-12-31"), 1))
-ls.seq.theta.w.p.fls.day <- list(df.seq, df.theta.fls.day, df.w.fls.day, df.p.fls)
-df.seq.theta.w.p.fls.day <- Reduce(function(...) merge(..., by = "date", all = TRUE), 
-                                   ls.seq.theta.w.p.fls.day)
-df.seq.theta.w.p.fls.day.cc <- df.seq.theta.w.p.fls.day[complete.cases(df.seq.theta.w.p.fls.day), ]
-
-# Import corresponding raster files
-rst.theta.w.p <- foreach(i = 2:4, j = c("theta", "w", "p"), .packages = lib) %dopar% {
-  tmp.rst <- stack(df.seq.theta.w.p.fls.day.cc[, i])
-  
-  if (j == "theta") {
-    return(cos(tmp.rst))
-  } else if (j == "w") {
-    return(tmp.rst * 10) # cm -> mm
+fls_tau <- gsub("Solar_Zenith", "Atmospheric_Transmissivity", dat_tau$theta)
+dir_tau <- unique(dirname(fls_tau))
+if (!dir.exists(dir_tau)) dir.create(dir_tau)
+lst_tau <- foreach(i = 1:nrow(dat_tau), .packages = "reset") %dopar% {
+  if (file.exists(fls_tau[i])) {
+    raster(fls_tau[i])
   } else {
-    return(tmp.rst * 0.1) # hPa -> kPa
+    rst <- reset::atmosTrans(Pa = raster::raster(dat_tau$pressure[i]), 
+                             theta = raster::raster(dat_tau$theta[i]) * pi / 180, 
+                             W = raster::raster(dat_tau$precipitable[i]))
+    
+    raster::writeRaster(rst, filename = fls_tau[i], format = "GTiff", 
+                        overwrite = TRUE)
+  }
+}
+rst_tau <- stack(lst_tau)
+
+dat_tau <- data.frame(datetime = dat_tau$datetime, transmissivity = fls_tau, 
+                      stringsAsFactors = FALSE)
+
+
+### inverse squared earth-sun distance ---
+
+esd <- calcEarthSunDist(strptime(dts_theta, "%Y%j.%H%S"), formula = "Duffie")
+dat_esd <- data.frame(datetime = dts_theta, distance = esd, 
+                      stringsAsFactors = FALSE)
+
+
+### solar incidence angle -----
+
+## digital elevation model in epsg:4326
+rst_dem <- raster("data/dem/DEM_ARC1960_30m_Hemp.tif")
+rst_dem <- trim(projectRaster(resample(rst_dem, rst_ref_utm), crs = "+init=epsg:4326"))
+
+## scan start time
+fls_sst <- list.files("data/MOD05_L2.006/Scan_Start_Time", full.names = TRUE, 
+                      pattern = "Scan_Start_Time.tif$")
+
+dts_sst <- substr(basename(fls_sst), 11, 22)
+dat_sst <- data.frame(datetime = dts_sst, start_time = fls_sst, 
+                      stringsAsFactors = FALSE)
+
+## solar incidence angle
+dir_sia <- "data/MOD05_L2.006/Solar_Incidence_Angle"
+if (!dir.exists(dir_sia)) dir.create(dir_sia)
+
+lst_sia <- foreach(i = unstack(rst_sst), .packages = "satellite") %dopar% {
+  fls <- gsub("Scan_Start_Time", "Solar_Incidence_Angle", names(i))
+  fls <- paste0(dir_sia, "/", fls, ".tif")
+  if (file.exists(fls)) {
+    raster(fls)
+  } else {
+    rst <- solarIncidenceAngle(i, dem = rst_dem, formula = "Spencer")
+    writeRaster(rst, filename = fls, format = "GTiff", overwrite = TRUE)
   }
 }
 
-rst.theta.w.p[[3]] <- resample(rst.theta.w.p[[3]], rst.theta.w.p[[1]])
+fls_sia <- list.files("data/MOD05_L2.006/Solar_Incidence_Angle", 
+                      full.names = TRUE, pattern = "Incidence_Angle.tif")
 
-theta.cos <- rst.theta.w.p[[1]]
-w <- rst.theta.w.p[[2]]
-p <- rst.theta.w.p[[3]]
+dts_sia <- substr(basename(fls_sia), 11, 22)
+dat_sia <- data.frame(datetime = dts_sia, incidence = fls_sia, 
+                      stringsAsFactors = FALSE)
 
-# tau_sw (broadband atmospheric transmissivity)
-tau.sw <- 0.35 + 0.627 * exp((-0.00146 * p / (k.t * theta.cos)) - (0.075 * (w / theta.cos)^0.4))
 
-# d_r (inverse squared relative earth-sun distance)
-doy.fls <- substr(basename(df.seq.theta.w.p.fls.day.cc[, 2]), 19, 21)
-doy <- as.numeric(doy.fls)
+### shortwave downward radiation -----
 
-d.r <- 1 + 0.033 * cos(doy * 2 * pi / 365)
+dat_rsd <- Reduce(function(...) merge(..., all = TRUE, by = "datetime"), 
+                  list(dat_esd, dat_sia, dat_tau))
+dat_rsd <- dat_rsd[complete.cases(dat_rsd), ]
 
-# R_sd
-r.sd <- g.sc * d.r * tau.sw * theta.cos
-r.sd <- writeRaster(r.sd, filename = "model_input/R_sd_13", format = "GTiff", 
-                    overwrite = TRUE, bylayer = FALSE)
+## target folder and files
+fls_rsd <- gsub("Solar_Incidence_Angle", "Shortwave_Downward_Radiation", 
+                dat_rsd$incidence)
+dir_rsd <- unique(dirname(fls_rsd))
+if (!dir.exists(dir_rsd)) dir.create(dir_rsd)
 
-indices <- as.numeric(as.factor(substr(df.seq.theta.w.p.fls.day.cc[, 1], 6, 7)))
-tmp <- stackApply(r.sd, indices, fun = median)
-plot(tmp)
+## compute per-scene shortwave downward radiation
+lst_rsd <- foreach(i = 1:nrow(dat_rsd), .packages = "reset") %dopar% {
+  if (file.exists(fls_rsd[i])) {
+    raster::raster(fls_rsd[i])
+  } else {
+    rst <- reset::swdr(d = dat_rsd$distance[i], 
+                       tau = raster::raster(dat_rsd$transmissivity[i]), 
+                       theta = raster::raster(dat_rsd$incidence[i]))
+  
+    raster::writeRaster(rst, filename = fls_rsd[i], 
+                        format = "GTiff", overwrite = TRUE)  
+  }
+}
+rst_rsd <- stack(lst_rsd)
 
 
 ## R_lu (longwave upward radiation)
