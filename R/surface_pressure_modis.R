@@ -3,16 +3,12 @@
 ## clear workspace
 rm(list = ls(all = TRUE))
 
-## source functions
-library(Rcpp)
-sourceCpp("R/barometricFormula.cpp")
-
 ## set working directory
 Orcs::setwdOS(path_lin = "/media/fdetsch/XChange/", path_win = "D:/",
               path_ext = "kilimanjaro/evapotranspiration/")
 
 ## load packages
-library(raster)
+library(satellite)
 library(doParallel)
 
 ## parallelization
@@ -33,13 +29,13 @@ rst_dem <- trim(projectRaster(rst_dem, crs = "+init=epsg:4326"))
 num_dem <- getValues(rst_dem)
 
 ## list and import temperature files
-fls_ta <- list.files("data/MOD07_L2.006/Retrieved_Temperature_Profile", 
+fls_ta <- list.files("data/MYD07_L2.006/Retrieved_Temperature_Profile", 
                      full.names = TRUE, pattern = "Profile.tif$")
 
 lst_ta <- foreach(i = fls_ta, .packages = "raster") %dopar% raster::stack(i)
 
 ## resample geopotential files
-fls_gp <- list.files("data/MOD07_L2.006/Retrieved_Height_Profile", 
+fls_gp <- list.files("data/MYD07_L2.006/Retrieved_Height_Profile", 
                      full.names = TRUE, pattern = "Profile.tif$")
 
 lst_gp <- foreach(i = fls_gp, .packages = "raster") %dopar% raster::stack(i)
@@ -60,18 +56,16 @@ if (!dir.exists(unique(dirname(fls_sp)))) dir.create(unique(dirname(fls_sp)))
 
 ## loop over scenes
 lst_sp <- foreach(i = lst_gp, j = lst_ta, k = as.list(fls_sp), 
-                  .packages = c("raster", "Rcpp")) %dopar% {
+                  .packages = "satellite") %dopar% {
   
   if (!(all(is.na(raster::maxValue(i))) | all(is.na(raster::maxValue(j))))) {
     if (file.exists(k)) {
       raster::raster(k)
     } else {  
-      
-      raster::overlay(i, j, fun = function(x, y, ...) {
-        val <- run_barometricFormula(x[], y[], num_dem, p)
-        val[val == -999] <- NA
-        return(val)
-      }, unstack = FALSE, filename = k, format = "GTiff", overwrite = TRUE)
+  
+      # compute near-surface air pressure  
+      satellite::surfacePressure(i, j, num_dem, p, filename = k, 
+                                 format = "GTiff", overwrite = TRUE)
     }
   }
 }
