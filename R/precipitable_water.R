@@ -4,7 +4,7 @@
 rm(list = ls(all = TRUE))
 
 ## load packages
-lib <- c("reset", "doParallel")
+lib <- c("reset", "satellite", "doParallel")
 Orcs::loadPkgs(lib)
 
 ## set working directory
@@ -164,11 +164,11 @@ lst_res <- foreach(product = c("MOD05_L2.006", "MYD05_L2.006")) %do% {
   cat("Commencing with", product, "...\n")
   
   # import required parameters
-  fls_ptw <- list.files(paste("data", product, prm[2], "qc2", sep = "/"), 
-                        full.names = TRUE, pattern = paste0(prm[2], ".tif$"))
+  fls_ptw <- list.files(paste("data", product, prm[3], "qc2", sep = "/"), 
+                        full.names = TRUE, pattern = paste0(prm[3], ".tif$"))
 
   # target folder and files  
-  dir_res <- paste("data", product, prm[2], "res", sep = "/")
+  dir_res <- paste("data", product, prm[3], "res", sep = "/")
   if (!dir.exists(dir_res)) dir.create(dir_res)
   
   fls_res <- paste0(dir_res, "/RES_", basename(fls_ptw))
@@ -178,8 +178,13 @@ lst_res <- foreach(product = c("MOD05_L2.006", "MYD05_L2.006")) %do% {
       raster::raster(j)
     } else {
       rst <- raster::raster(i)
-      rst_prj <- raster::projectRaster(rst, crs = raster::projection(rst_ref))
-      raster::resample(rst_prj, rst_ref, filename = j, 
+      
+      # reproject
+      if (!raster::compareCRS(rst_ref, rst))
+        rst <- raster::projectRaster(rst, crs = raster::projection(rst_ref))
+      
+      # resample
+      raster::resample(rst, rst_ref, filename = j, 
                        format = "GTiff", overwrite = TRUE)
     }
   }
