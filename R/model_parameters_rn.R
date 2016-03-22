@@ -56,7 +56,7 @@ dts_ptw <- substr(basename(fls_ptw), 23, 34)
 dat_ptw <- data.frame(datetime = dts_ptw, precipitable = fls_ptw, 
                       stringsAsFactors = FALSE)
 
-## air pressure
+## air pressure (modis)
 
 # import available files
 fls_sp <- list.files("data/MOD07_L2.006/Surface_Pressure", full.names = TRUE, 
@@ -66,9 +66,23 @@ dts_sp <- substr(basename(fls_sp), 11, 22)
 dat_sp <- data.frame(datetime = dts_sp, pressure = fls_sp, 
                      stringsAsFactors = FALSE)
 
+## air pressure (ecmwf)
+
+# import available files
+fls_sp_ecmwf <- list.files("data/ecmwf/surface_pressure", full.names = TRUE, 
+                           pattern = "surface_pressure.tif$")
+
+dts_sp_ecmwf <- substr(basename(fls_sp_ecmwf), 1, 7)
+dat_sp_ecmwf <- data.frame(date = dts_sp_ecmwf, pressure = fls_sp_ecmwf, 
+                           stringsAsFactors = FALSE)
+
 ## compute atmospheric transmissivity for each complete scene
-dat_tau <- Reduce(function(...) merge(..., all = TRUE, by = "datetime"), 
-                  list(dat_sp, dat_theta, dat_ptw))
+dat_mrg <- merge(dat_theta, dat_ptw, all = TRUE, by = "datetime")
+dat_mrg$date <- substr(dat_mrg$datetime, 1, 7)
+dat_tau <- merge(dat_mrg, dat_sp_ecmwf, all = TRUE, by = "date")
+
+# dat_tau <- Reduce(function(...) merge(..., all = TRUE, by = "datetime"), 
+#                   list(dat_sp, dat_theta, dat_ptw))
 
 dat_tau <- dat_tau[complete.cases(dat_tau), ]
 
@@ -77,7 +91,7 @@ dir_tau <- unique(dirname(fls_tau))
 if (!dir.exists(dir_tau)) dir.create(dir_tau)
 lst_tau <- foreach(i = 1:nrow(dat_tau), .packages = "reset") %dopar% {
   if (file.exists(fls_tau[i])) {
-    raster(fls_tau[i])
+    raster::raster(fls_tau[i])
   } else {
     rst <- reset::atmosTrans(Pa = raster::raster(dat_tau$pressure[i]), 
                              theta = raster::raster(dat_tau$theta[i]) * pi / 180, 
@@ -113,6 +127,31 @@ fls_sst <- list.files("data/MOD05_L2.006/Scan_Start_Time", full.names = TRUE,
 dts_sst <- substr(basename(fls_sst), 11, 22)
 dat_sst <- data.frame(datetime = dts_sst, start_time = fls_sst, 
                       stringsAsFactors = FALSE)
+
+## time from solar zenith
+rst <- raster(dat_theta$theta[1])
+
+yrs <- raster::res(rst)[2]
+lts <- seq(raster::ymax(rst) - .5 * yrs, raster::ymin(rst), -yrs)
+
+mat <- matrix(ncol = raster::ncol(rst), nrow = raster::nrow(rst))
+for (i in 1:nrow(mat)) mat[i, ] <- lts[i]
+
+phi <- raster::raster(mat, template = rst)
+
+fls_opt <- gsub("Scan_Start_Time", "Overpass_Time", fls_sst)
+dir_opt <- unique(dirname(fls_opt))
+if (!dir.exists(dir_opt)) dir.create(dir_opt)
+dts_theta <- as.Date(dat_theta[, 1], "%Y%j.%H%M")
+
+foreach(i = 1:length(fls_theta), .packages = "satellite") %dopar%
+  fromSolarZenith(raster::stack(fls_theta[1:3]), phi, n = dts_theta[1:3], 
+                  formula = "Spencer", daytime = "AM")
+
+, 
+filename = fls_opt[1], format = "GTiff", overwrite = TRUE
+
+
 
 ## solar incidence angle
 dir_sia <- "data/MOD05_L2.006/Solar_Incidence_Angle"
