@@ -2,7 +2,6 @@
 
 ## source functions
 source("R/downloadECMWF.R")
-source("R/barometricFormula.R")
 
 ## set working directory
 Orcs::setwdOS(path_lin = "/media/fdetsch/XChange/", path_win = "D:/",
@@ -34,11 +33,12 @@ fls_gp <- downloadECMWF(st, nd, last, prm = "geopotential",
 ### pre-processing -----
 
 ## reference resolution and extent (250-m, southern kilimanjaro region)
-rst_ref <- raster("data/MYD09Q1.006/ndvi/NDVI_MYD09Q1.A2013001.sur_refl.tif")
+rst_ref_utm <- raster("data/MYD09Q1.006/ndvi/NDVI_MYD09Q1.A2013001.sur_refl.tif")
+rst_ref <- trim(projectRaster(rst_ref_utm, crs = "+init=epsg:4326"))
 
 ## digital elevation model
 rst_dem <- raster("data/dem/DEM_ARC1960_30m_Hemp.tif")
-rst_dem <- resample(rst_dem, rst_ref)
+rst_dem <- trim(projectRaster(resample(rst_dem, rst_ref_utm), crs = "+init=epsg:4326"))
 
 ## resample temperature files
 lst_ta <- foreach(i = fls_ta, .packages = c("raster", "rgdal")) %dopar% {
@@ -58,12 +58,8 @@ lst_ta <- foreach(i = fls_ta, .packages = c("raster", "rgdal")) %dopar% {
     if (any(scoff != matrix(c(1, 0), nc = 2)))
       rst <- rst * scoff[, "scale"] + scoff[, "offset"]
     
-    ## project to utm-37s
-    rst_prj <- raster::projectRaster(rst, crs = raster::projection(rst_ref))
-    
     ## resample to reference grid (extent, resolution)
-    rst_res <- raster::resample(rst_prj, rst_ref, 
-                                filename = fls_res, 
+    rst_res <- raster::resample(rst, rst_ref, filename = fls_res, 
                                 format = "GTiff", overwrite = TRUE)
     
   } else {
@@ -93,12 +89,8 @@ lst_gp <- foreach(i = fls_gp, .packages = c("raster", "rgdal")) %dopar% {
     ## divide by gravity constant
     rst <- rst / 9.80665
     
-    ## project to utm-37s
-    rst_prj <- raster::projectRaster(rst, crs = raster::projection(rst_ref))
-    
     ## resample to reference grid (extent, resolution)
-    rst_res <- raster::resample(rst_prj, rst_ref, 
-                                filename = fls_res, 
+    rst_res <- raster::resample(rst, rst_ref, filename = fls_res, 
                                 format = "GTiff", overwrite = TRUE)
     
   } else {
