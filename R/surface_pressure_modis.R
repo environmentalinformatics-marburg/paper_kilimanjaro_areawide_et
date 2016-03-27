@@ -18,14 +18,13 @@ registerDoParallel(cl)
 
 ### pre-processing -----
 
-## reference raster and digital elevation model
-rst_ref <- raster("data/MYD09Q1.006/ndvi/NDVI_MYD09Q1.A2013001.sur_refl.tif")
+## reference resolution and extent (250-m, southern kilimanjaro region)
+rst_ref_utm <- raster("data/MYD09Q1.006/ndvi/NDVI_MYD09Q1.A2013001.sur_refl.tif")
+rst_ref <- trim(projectRaster(rst_ref_utm, crs = "+init=epsg:4326"))
 
+## digital elevation model
 rst_dem <- raster("data/dem/DEM_ARC1960_30m_Hemp.tif")
-rst_dem <- resample(rst_dem, rst_ref)
-
-rst_ref <- trim(projectRaster(rst_ref, crs = "+init=epsg:4326"))
-rst_dem <- trim(projectRaster(rst_dem, crs = "+init=epsg:4326"))
+rst_dem <- trim(projectRaster(resample(rst_dem, rst_ref_utm), crs = "+init=epsg:4326"))
 num_dem <- getValues(rst_dem)
 
 ## list and import temperature files
