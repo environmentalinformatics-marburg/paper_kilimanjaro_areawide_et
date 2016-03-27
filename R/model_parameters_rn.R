@@ -23,7 +23,7 @@ rst_ref <- trim(projectRaster(rst_ref_utm, crs = "+init=epsg:4326"))
 ### atmospheric transmissivity -----
 
 ## solar zenith angle
-fls_theta <- list.files("data/MOD05_L2.006/Solar_Zenith", full.names = TRUE, 
+fls_theta <- list.files("data/MYD05_L2.006/Solar_Zenith", full.names = TRUE, 
                         pattern = "Solar_Zenith.tif$")
 
 dts_theta <- substr(basename(fls_theta), 11, 22)
@@ -31,7 +31,7 @@ dat_theta <- data.frame(datetime = dts_theta, theta = fls_theta,
                         stringsAsFactors = FALSE)
 
 ## precipitable water content
-fls_ptw <- list.files("data/MOD05_L2.006/Water_Vapor_Near_Infrared/res", 
+fls_ptw <- list.files("data/MYD05_L2.006/Water_Vapor_Near_Infrared/res", 
                       full.names = TRUE, pattern = "Near_Infrared.tif$")
 
 # # merge replicate daily scenes
@@ -59,7 +59,7 @@ dat_ptw <- data.frame(datetime = dts_ptw, precipitable = fls_ptw,
 ## air pressure (modis)
 
 # import available files
-fls_sp <- list.files("data/MOD07_L2.006/Surface_Pressure", full.names = TRUE, 
+fls_sp <- list.files("data/MYD07_L2.006/Surface_Pressure", full.names = TRUE, 
                      pattern = "Surface_Pressure.tif$")
 
 dts_sp <- substr(basename(fls_sp), 11, 22)
@@ -93,18 +93,23 @@ lst_tau <- foreach(i = 1:nrow(dat_tau), .packages = "reset") %dopar% {
   if (file.exists(fls_tau[i])) {
     raster::raster(fls_tau[i])
   } else {
-    rst <- reset::atmosTrans(Pa = raster::raster(dat_tau$pressure[i]), 
-                             theta = raster::raster(dat_tau$theta[i]) * pi / 180, 
+    rst <- reset::atmosTrans(Pa = raster::raster(dat_tau$pressure[i]),
+                             theta = raster::raster(dat_tau$theta[i]) * pi / 180,
                              W = raster::raster(dat_tau$precipitable[i]))
-    
-    raster::writeRaster(rst, filename = fls_tau[i], format = "GTiff", 
-                        overwrite = TRUE)
+
+    if (!(all(is.na(raster::maxValue(rst))))) {
+      raster::writeRaster(rst, filename = fls_tau[i], format = "GTiff",
+                          overwrite = TRUE)
+    } else {
+      return(NULL)
+    }
   }
 }
-rst_tau <- stack(lst_tau)
 
-dat_tau <- data.frame(datetime = dat_tau$datetime, transmissivity = fls_tau, 
-                      stringsAsFactors = FALSE)
+fls_tau <- list.files(dir_tau, pattern = "Transmissivity.tif", full.names = TRUE)
+rst_tau <- stack(fls_tau)
+dat_tau <- data.frame(datetime = substr(basename(fls_tau), 11, 22), 
+                      transmissivity = fls_tau, stringsAsFactors = FALSE)
 
 
 ### inverse squared earth-sun distance ---
@@ -121,7 +126,7 @@ rst_dem <- raster("data/dem/DEM_ARC1960_30m_Hemp.tif")
 rst_dem <- trim(projectRaster(resample(rst_dem, rst_ref_utm), crs = "+init=epsg:4326"))
 
 ## scan start time
-fls_sst <- list.files("data/MOD05_L2.006/Scan_Start_Time", full.names = TRUE, 
+fls_sst <- list.files("data/MYD05_L2.006/Scan_Start_Time", full.names = TRUE, 
                       pattern = "Scan_Start_Time.tif$")
 
 dts_sst <- substr(basename(fls_sst), 11, 22)
@@ -144,31 +149,32 @@ dir_opt <- unique(dirname(fls_opt))
 if (!dir.exists(dir_opt)) dir.create(dir_opt)
 dts_theta <- as.Date(dat_theta[, 1], "%Y%j.%H%M")
 
-foreach(i = 1:length(fls_theta), .packages = "satellite") %dopar%
-  fromSolarZenith(raster::stack(fls_theta[1:3]), phi, n = dts_theta[1:3], 
-                  formula = "Spencer", daytime = "AM")
-
-, 
-filename = fls_opt[1], format = "GTiff", overwrite = TRUE
-
-
+lst_opt <- foreach(i = 1:length(fls_theta), .packages = "satellite") %dopar% {
+  if (file.exists(fls_opt[i])) {
+    raster::raster(fls_opt[i])
+  } else {
+    satellite::fromSolarZenith(raster::stack(fls_theta[i]), phi, n = dts_theta[i], 
+                               formula = "Spencer", daytime = "PM", 
+                               filename = fls_opt[i], format = "GTiff", overwrite = TRUE)
+  }
+}
 
 ## solar incidence angle
-dir_sia <- "data/MOD05_L2.006/Solar_Incidence_Angle"
+dir_sia <- "data/MYD05_L2.006/Solar_Incidence_Angle"
 if (!dir.exists(dir_sia)) dir.create(dir_sia)
 
-lst_sia <- foreach(i = unstack(rst_sst), .packages = "satellite") %dopar% {
-  fls <- gsub("Scan_Start_Time", "Solar_Incidence_Angle", names(i))
+lst_sia <- foreach(i = lst_opt, .packages = "satellite") %dopar% {
+  fls <- gsub("Overpass_Time", "Solar_Incidence_Angle", names(i))
   fls <- paste0(dir_sia, "/", fls, ".tif")
   if (file.exists(fls)) {
     raster(fls)
   } else {
-    rst <- solarIncidenceAngle(i, dem = rst_dem, formula = "Spencer")
-    writeRaster(rst, filename = fls, format = "GTiff", overwrite = TRUE)
+    rst <- satellite::solarIncidenceAngle(i, dem = rst_dem, formula = "Spencer")
+    raster::writeRaster(rst, filename = fls, format = "GTiff", overwrite = TRUE)
   }
 }
 
-fls_sia <- list.files("data/MOD05_L2.006/Solar_Incidence_Angle", 
+fls_sia <- list.files("data/MYD05_L2.006/Solar_Incidence_Angle", 
                       full.names = TRUE, pattern = "Incidence_Angle.tif")
 
 dts_sia <- substr(basename(fls_sia), 11, 22)
