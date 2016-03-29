@@ -3,16 +3,16 @@
 ## clear workspace
 rm(list = ls(all = TRUE))
 
+## source functions
+source("R/uniformExtent.R")
+
 ## set working directory
 Orcs::setwdOS(path_lin = "/media/fdetsch/XChange/", path_win = "D:/",
               path_ext = "kilimanjaro/evapotranspiration/")
 
 ## load packages
-lib <- c("Rsenal", "MODIS", "doParallel")
+lib <- c("Rsenal", "MODIS", "doParallel", "kza")
 Orcs::loadPkgs(lib)
-
-## source functions
-source("src/uniformExtent.R")
 
 ## parallelization
 cl <- makeCluster(detectCores() - 1)
@@ -139,3 +139,40 @@ rst_qc2 <- raster::stack(lst_qc2)
 fls_qc2 <- list.files(dir_qc2, pattern = "Lai_500m.tif$", full.names = TRUE)
 rst_qc2 <- raster::stack(fls_qc2)
 
+
+### quality control, step #3: --------------------------------------------------
+### discard pixels adjacent to clouds
+
+dir_adj <- "data/MCD15A2H.006/adj"
+if (!dir.exists(dir_adj)) dir.create(dir_adj)
+
+lst_adj <- foreach(i = unstack(rst_qc2), .packages = "raster") %dopar% {
+  msk <- raster::focal(i, w = matrix(c(1, 1, 1, 1, 0, 1, 1, 1, 1), 3, 3), 
+                       fun = function(...) any(is.na(...)))
+  
+  raster::overlay(i, msk, fun = function(x, y) {
+    x[y[] == 1] <- NA
+    return(x)
+  }, filename = paste(dir_adj, names(i), sep = "/"), 
+  format = "GTiff", overwrite = TRUE)
+}
+
+rst_adj <- stack(lst_adj)
+
+
+### gap-filling ----------------------------------------------------------------
+### kolmogorov-zurbenko adaptive
+
+mat_adj <- as.matrix(rst_adj)
+
+mat_gf <- t(apply(mat_adj, 1, FUN = function(x) kza(x, m = 5)$kz))
+rst_gf <- setValues(rst_adj, mat_gf)
+
+dir_gf <- "data/MCD15A2H.006/gf"
+if (!dir.exists(dir_gf)) dir.create(dir_gf)
+
+lst_gf <- foreach(i = unstack(rst_gf), j = unstack(rst_adj)) %do% 
+  raster::writeRaster(i, filename = paste(dir_gf, names(j), sep = "/"), 
+                      format = "GTiff", overwrite = TRUE)
+
+rst_gf <- stack(lst_gf)
