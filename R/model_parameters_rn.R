@@ -209,63 +209,154 @@ lst_rsd <- foreach(i = 1:nrow(dat_rsd), .packages = "reset") %dopar% {
 }
 rst_rsd <- stack(lst_rsd)
 
+## 8-day aggregation
+fls_rsd <- list.files("data/MYD05_L2.006/Shortwave_Downward_Radiation", 
+                      full.names = TRUE, pattern = "Shortwave_Downward_Radiation.tif")
 
-## R_lu (longwave upward radiation)
+dts_rsd <- substr(basename(fls_rsd), 11, 22)
+dat_rsd <- data.frame(datetime = dts_rsd, swdr = fls_rsd, 
+                      stringsAsFactors = FALSE)
 
-st <- "2012"
-nd <- "2012"
+dir_agg <- "data/MYD05_L2.006/Shortwave_Downward_Radiation/agg"
+if (!dir.exists(dir_agg)) dir.create(dir_agg)
 
-# NDVI
-ndvi.fls.terra <- list.files("data/MOD13Q1.006/whittaker", pattern = ".tif$", 
-                       full.names = TRUE)
-
-ndvi.fls.terra <- ndvi.fls.terra[grep(st, ndvi.fls.terra)[1]:grep(nd, ndvi.fls.terra)[length(grep(nd, ndvi.fls.terra))]]
-
-ndvi.fls.aqua <- list.files("data/MYD13Q1.006/whittaker", pattern = ".tif$", 
-                             full.names = TRUE)
-
-ndvi.fls.aqua <- ndvi.fls.aqua[grep(st, ndvi.fls.aqua)[1]:grep(nd, ndvi.fls.aqua)[length(grep(nd, ndvi.fls.aqua))]]
-
-ndvi.fls <- c(ndvi.fls.terra, ndvi.fls.aqua)
-ndvi.fls <- ndvi.fls[order(substr(basename(ndvi.fls), 5, 11))]
-
-ndvi <- stack(ndvi.fls)
-
-ndvi_rsmpl <- resample(ndvi, lai[[1]], filename = "data/MCD13Q1.006/rsmpl/RSMPL", 
-                       bylayer = TRUE, suffix = names(ndvi), format = "GTiff", 
-                       overwrite = TRUE)
-
-# LAI
-lai.fls <- list.files("data/lai_rsmpl", pattern = "^COMB.*.tif", 
-                      full.names = TRUE)
-lai.fls <- lai.fls[grep(st, lai.fls)[1]:grep(nd, lai.fls)[length(grep(nd, lai.fls))]]
-lai <- stack(lai.fls)
-
-# sigma (Stefan-Boltzmann constant, 5.67 * 10^(-8) Wm^(-2)K^(-4))
-sigma <- 5.67 * 10^(-8)
-
-# lst (land surface temperature)
-lst.fls <- list.files("data/MCD11A2/rsmpl/", pattern = "^RSMPL.*.tif$", 
-                      full.names = TRUE)
-lst.fls <- lst.fls[grep(st, lst.fls)[1]:grep(nd, lst.fls)[length(grep(nd, lst.fls))]]
-lst <- stack(lst.fls)
-
-# epsilon_s (broadband surface emissivity)
-epsilon.s <- stack(lapply(seq_len(nlayers(ndvi_rsmpl)), function(i) {
-  x <- ndvi_rsmpl[[i]] / 10000
-  y <- lai[[i]]
-
-  x[x[] > 0 & y[] <= 3] <- 0.95 + 0.01 * y[x[] > 0 & y[] <= 3]
-  x[x[] > 0 & y[] > 3] <- 0.98
-  x[x[] <= 0] <- 0.985
+lst_rsd_agg <- lapply(2013:2015, function(i) {
+  dat <- dat_rsd[grep(i, dts_rsd), ]
+  id <- as.numeric(cut(as.Date(dat$datetime, "%Y%j.%H%M"), "8 days"))
+  rst <- raster::stackApply(raster::stack(dat$swdr), id, fun = mean)
   
-  return(x)
-}))
+  fls_agg <- paste0(dir_agg, "/Shortwave_Downward_Radiation_", 
+                    unique(strftime(cut(as.Date(dat$datetime, "%Y%j.%H%M"), "8 days"), 
+                             "%Y%j")))
+  
+  lst_agg <- foreach(j = 1:nlayers(rst)) %do% 
+    writeRaster(rst[[j]], filename = fls_agg[j], 
+                format = "GTiff", overwrite = TRUE)
+  
+  raster::stack(lst_agg)
+})
 
-# R_lu
-r.lu <- sigma * epsilon.s * lst^4
-r.lu <- writeRaster(r.lu, filename = "model_input/R_lu_13", format = "GTiff", 
-                    overwrite = TRUE, bylayer = FALSE)
+rst_rsd_agg <- stack(lst_rsd_agg)
+
+fls_rsd_agg <- list.files("data/MYD05_L2.006/Shortwave_Downward_Radiation/agg", 
+                          pattern = "^Shortwave.*.tif$", full.names = TRUE)
+
+dts_rsd_agg <- substr(sapply(strsplit(basename(fls_rsd_agg), "_"), "[[", 4), 1, 7)
+dat_rsd_agg <- data.frame(datetime = dts_rsd_agg, swdr_agg = fls_rsd_agg, 
+                          stringsAsFactors = FALSE)
+
+
+### shortwave upward radiation -----
+
+## shortwave white-sky albedo
+fls_alpha <- list.files("data/MCD43A3.005/crp", full.names = TRUE, 
+                        pattern = "^MCD43A3.*shortwave.tif$")
+rst_alpha <- stack(fls_alpha)
+rst_alpha <- resample(rst_alpha, rst_ref_utm)
+
+dts_alpha <- substr(basename(fls_alpha), 10, 16)
+dat_alpha <- data.frame(datetime = dts_alpha, albedo = fls_alpha, 
+                        stringsAsFactors = FALSE)
+
+## shortwave upward radiation
+dat_rsu <- merge(dat_alpha, dat_rsd_agg, by = "datetime", all = TRUE)
+dat_rsu <- dat_rsu[complete.cases(dat_rsu), ]
+
+dir_rsu <- "data/MCD43A3.005/Shortwave_Upward_Radiation"
+if (!dir.exists(dir_rsu)) dir.create(dir_rsu)
+
+fls_rsu <- gsub("Albedo_WSA_shortwave", "Shortwave_Upward_Radiation", dat_rsu$albedo)
+fls_rsu <- paste0(dir_rsu, "/", basename(fls_rsu))
+
+lst_rsu <- foreach(i = 1:nrow(dat_rsu), .packages = "raster") %dopar% {
+  swdr <- raster::resample(
+    raster::projectRaster(
+      raster::raster(dat_rsu$swdr[i]), crs = "+init=epsg:21037")
+  , rst_ref_utm)
+  
+  albedo <- raster::resample(
+    raster::raster(dat_rsu$albedo[i])
+  , rst_ref_utm)
+  
+  raster::overlay(swdr, albedo, fun = function(x, y) x * (1 - y), 
+                  filename = fls_rsu[i], format = "GTiff", overwrite = TRUE)
+}
+
+rst_rsu <- stack(lst_rsu)
+
+
+### land surface temperature -----
+
+fls_lst <- list.files("data/MYD11A2.005/qc", full.names = TRUE, 
+                        pattern = "^MYD11A2.*Day_1km.tif$")
+rst_lst <- stack(fls_lst)
+rst_lst <- resample(rst_lst, rst_ref_utm)
+
+dts_lst <- substr(basename(fls_lst), 10, 16)
+dat_lst <- data.frame(datetime = dts_lst, lst = fls_lst, 
+                      stringsAsFactors = FALSE)
+
+
+### broadband surface emissivity -----
+
+## ndvi
+fls_ndvi <- list.files("data/MYD09Q1.006/ndvi", full.names = TRUE, 
+                      pattern = "^NDVI_MYD09Q1.*.tif$")
+rst_ndvi <- stack(fls_ndvi)
+
+dts_ndvi <- substr(basename(fls_ndvi), 15, 21)
+dat_ndvi <- data.frame(datetime = dts_ndvi, ndvi = fls_ndvi, 
+                      stringsAsFactors = FALSE)
+
+## lai
+fls_lai <- list.files("data/MCD15A2H.006/qc2", full.names = TRUE, 
+                       pattern = "^MCD15A2H.*.tif$")
+rst_lai <- stack(fls_lai)
+rst_lai <- resample(rst_lai, rst_ndvi[[1]])
+
+dts_lai <- substr(basename(fls_lai), 11, 17)
+dat_lai <- data.frame(datetime = dts_lai, lai = fls_lai, 
+                       stringsAsFactors = FALSE)
+
+## surface emissivity
+dir_bsa <- "data/MCD15A2H.006/Surface_Emissivity"
+if (!dir.exists(dir_bsa)) dir.create(dir_bsa)
+
+fls_bsa <- gsub("Lai", "Surface_Emissivity", names(rst_lai))
+fls_bsa <- paste0(dir_bsa, "/", fls_bsa)
+
+lst_bsa <- foreach(i = 1:nlayers(rst_ndvi), j = fls_bsa, 
+                   .packages = "reset") %dopar% {
+  if (file.exists(j)) {
+    raster::raster(j)
+  } else {
+    reset::surfaceEmissivity(rst_ndvi[[i]], rst_lai[[i]], filename = j, 
+                           format = "GTiff", overwrite = TRUE)
+  }
+}
+
+rst_bsa <- stack(lst_bsa)
+
+
+### longwave upward radiation -----
+
+dir_lwur <- "data/MCD15A2H.006/Longwave_Upward_Radiation"
+if (!dir.exists(dir_lwur)) dir.create(dir_lwur)
+
+fls_lwur <- gsub("Surface_Emissivity", "Longwave_Upward_Radiation", names(rst_bsa))
+fls_lwur <- paste0(dir_lwur, "/", fls_lwur)
+
+lst_lwur <- foreach(i = 1:nlayers(rst_lst), j = fls_lwur, 
+                    .packages = "reset") %dopar% {
+  if (file.exists(j)) {
+    raster::raster(j)
+  } else {
+    reset::lwur(lst = rst_lst[[i]], bse = rst_bsa[[i]], filename = j, 
+                format = "GTiff", overwrite = TRUE)
+  }
+}
+
+rst_lwur <- stack(lst_lwur)
 
 
 ## R_ld (longwave downward radiation)
