@@ -3,6 +3,9 @@
 ## clear workspace
 rm(list = ls(all = TRUE))
 
+## source functions
+source("R/uniformExtent.R")
+
 ## set working directory
 Orcs::setwdOS(path_lin = "/media/fdetsch/XChange/", path_win = "D:/",
               path_ext = "kilimanjaro/evapotranspiration/")
@@ -10,9 +13,6 @@ Orcs::setwdOS(path_lin = "/media/fdetsch/XChange/", path_win = "D:/",
 ## load packages
 lib <- c("Rsenal", "MODIS", "doParallel")
 Orcs::loadPkgs(lib)
-
-## source functions
-source("src/uniformExtent.R")
 
 ## parallelization
 cl <- makeCluster(detectCores() - 1)
@@ -120,12 +120,24 @@ lst <- lapply(c("MOD11A2", "MYD11A2"), function(product) {
   #     overlay(i[[k]], j[[k]], fun = function(x, y) {
   #       id <- sapply(y[], function(l) {
   #         bin <- number2binary(l, 8, TRUE)
-  #         mandatory_qa <- substr(bin, 7, 8) == "00"
-  #         data_quality <- substr(bin, 5, 6) == "00"
-  #         emis_error <- substr(bin, 3, 4) == "00"
-  #         lst_error <- substr(bin, 1, 2) == "00"
-  # 
-  #         all(mandatory_qa, data_quality, emis_error, lst_error)
+  #         mandatory_qa <- substr(bin, 7, 8)
+  #         data_quality <- substr(bin, 5, 6)
+  #         
+  #         # pixel produced, good quality
+  #         if (mandatory_qa == "00" | data_quality == "00") {
+  #           return(TRUE)
+  #           
+  #         # pixel produced, unreliable or unquantifiable quality  
+  #         } else if (mandatory_qa == "01" | data_quality == "01") {
+  #           emis_error <- substr(bin, 3, 4) == "00"
+  #           lst_error <- substr(bin, 1, 2) == "00"
+  #           
+  #           return(all(emis_error, lst_error))
+  #           
+  #         # pixel not produced due to cloud effects or other reasons  
+  #         } else {
+  #           return(FALSE)
+  #         }
   #       })
   # 
   #       x[!id] <- NA
@@ -148,36 +160,42 @@ lst <- lapply(c("MOD11A2", "MYD11A2"), function(product) {
 
 ### combined product -----------------------------------------------------------
 
-lst_comb <- foreach(i = lst[[1]], j = lst[[2]]) %do% {
+lst_fill <- foreach(i = append(lst[[1]], lst[[2]]), 
+                    j = append(lst[[2]], lst[[1]]), 
+                    l = append(lst[[1]][c(2, 1)], lst[[2]][c(2, 1)]), 
+                    m = append(lst[[2]][c(2, 1)], lst[[1]][c(2, 1)])) %do% {
   
-  mat_terra <- raster::as.matrix(i)
-  mat_aqua <- raster::as.matrix(j)
+  mat_resp <- raster::as.matrix(i)
+  mat_pred1 <- raster::as.matrix(j)
+  mat_pred2 <- raster::as.matrix(l)
+  mat_pred3 <- raster::as.matrix(m)
 
-  mat_comb <- foreach(k = 1:nrow(mat_terra), .combine = "rbind") %do% {
-    dat <- data.frame(x = mat_terra[k, ], y = mat_aqua[k, ])
+  mat_fill <- foreach(k = 1:nrow(mat_resp), .combine = "rbind") %do% {
+    dat <- data.frame(y = mat_resp[k, ], x1 = mat_pred1[k, ], 
+                      x2 = mat_pred2[k, ], x3 = mat_pred3[k, ])
     
     if (sum(complete.cases(dat)) >= (.2 * nrow(dat))) {
-      mod <- lm(y ~ x, data = dat)
+      mod <- lm(y ~ x1 + x2 + x3, data = dat)
       
-      id <- which(!is.na(dat$x) & is.na(dat$y))
-      newdata <- data.frame(x = dat$x[id])
+      id <- which(!is.na(dat$x1) & !is.na(dat$x2) & !is.na(dat$x3) & is.na(dat$y))
+      newdata <- data.frame(x1 = dat$x1[id], x2 = dat$x2[id], x3 = dat$x3[id])
       dat$y[id] <- predict(mod, newdata)
     }
       
     return(dat$y)
   }
   
-  rst_comb <- raster::setValues(i, mat_comb)
+  rst_fill <- raster::setValues(i, mat_fill)
   
-  dir_comb <- "data/MCD11A2.005/"
-  if (!dir.exists(dir_comb)) dir.create(dir_comb)
+  dir_fill <- paste0(dirname(dirname(attr(i[[1]], "file")@name)), "/gf")
+  if (!dir.exists(dir_fill)) dir.create(dir_fill)
   
-  fls_comb <- paste0(dir_comb, gsub("^MYD", "MCD", names(j)))
-  lst_comb <- foreach(i = 1:ncol(mat_aqua), .packages = "raster") %dopar%
-    raster::writeRaster(rst_comb[[i]], filename = fls_comb[i], 
+  fls_fill <- paste0(dir_fill, "/", names(i))
+  lst_fill <- foreach(i = 1:ncol(mat_resp), .packages = "raster") %dopar%
+    raster::writeRaster(rst_fill[[i]], filename = fls_fill[i], 
                         format = "GTiff", overwrite = TRUE)
   
-  raster::stack(lst_comb)
+  raster::stack(lst_fill)
 }
 
 ## reimport combined files
