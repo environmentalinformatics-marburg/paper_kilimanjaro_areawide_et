@@ -79,3 +79,22 @@ lst_crp <- foreach(product = c("MCD43A3.005", "MCD43A2.005"),
     rst_crp <- raster::stack(lst_out)
   }
 }
+
+
+# ### gap-filling ----------------------------------------------------------------
+# ### kolmogorov-zurbenko adaptive
+# 
+# mat_adj <- as.matrix(rst_adj)
+# 
+# mat_gf <- t(apply(mat_adj, 1, FUN = function(x) kza(x, m = 5)$kz))
+# rst_gf <- setValues(rst_adj, mat_gf)
+# 
+# dir_gf <- "data/MCD15A2H.006/gf"
+# if (!dir.exists(dir_gf)) dir.create(dir_gf)
+# 
+# lst_gf <- foreach(i = unstack(rst_gf), j = unstack(rst_adj)) %do% 
+#   raster::writeRaster(i, filename = paste(dir_gf, names(j), sep = "/"), 
+#                       format = "GTiff", overwrite = TRUE)
+# 
+# rst_gf <- stack(lst_gf)
+
