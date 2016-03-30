@@ -165,44 +165,41 @@ lst_fill <- foreach(i = append(lst[[1]], lst[[2]]),
                     l = append(lst[[1]][c(2, 1)], lst[[2]][c(2, 1)]), 
                     m = append(lst[[2]][c(2, 1)], lst[[1]][c(2, 1)])) %do% {
   
-  mat_resp <- raster::as.matrix(i)
-  mat_pred1 <- raster::as.matrix(j)
-  mat_pred2 <- raster::as.matrix(l)
-  mat_pred3 <- raster::as.matrix(m)
-
-  mat_fill <- foreach(k = 1:nrow(mat_resp), .combine = "rbind") %do% {
-    dat <- data.frame(y = mat_resp[k, ], x1 = mat_pred1[k, ], 
-                      x2 = mat_pred2[k, ], x3 = mat_pred3[k, ])
-    
-    if (sum(complete.cases(dat)) >= (.2 * nrow(dat))) {
-      mod <- lm(y ~ x1 + x2 + x3, data = dat)
-      
-      id <- which(!is.na(dat$x1) & !is.na(dat$x2) & !is.na(dat$x3) & is.na(dat$y))
-      newdata <- data.frame(x1 = dat$x1[id], x2 = dat$x2[id], x3 = dat$x3[id])
-      dat$y[id] <- predict(mod, newdata)
-    }
-      
-    return(dat$y)
-  }
-  
-  rst_fill <- raster::setValues(i, mat_fill)
-  
   dir_fill <- paste0(dirname(dirname(attr(i[[1]], "file")@name)), "/gf")
   if (!dir.exists(dir_fill)) dir.create(dir_fill)
   
-  fls_fill <- paste0(dir_fill, "/", names(i))
-  lst_fill <- foreach(i = 1:ncol(mat_resp), .packages = "raster") %dopar%
-    raster::writeRaster(rst_fill[[i]], filename = fls_fill[i], 
-                        format = "GTiff", overwrite = TRUE)
-  
-  raster::stack(lst_fill)
-}
+  fls_fill <- paste0(dir_fill, "/", names(i), ".tif")
 
-## reimport combined files
-dir_comb <- "data/MCD11A2.005/"
-
-lst_comb <- foreach(i = pattern[c(1, 5)], .packages = "raster") %dopar% {
-  fls_comb <- list.files(dir_comb, pattern = i, full.names = TRUE)
-  raster::stack(fls_comb)
-}
+  if (all(file.exists(fls_fill))) {
+    stack(fls_fill)
+  } else {                      
+    
+    mat_resp <- raster::as.matrix(i)
+    mat_pred1 <- raster::as.matrix(j)
+    mat_pred2 <- raster::as.matrix(l)
+    mat_pred3 <- raster::as.matrix(m)
+    
+    mat_fill <- foreach(k = 1:nrow(mat_resp), .combine = "rbind") %do% {
+      dat <- data.frame(y = mat_resp[k, ], x1 = mat_pred1[k, ], 
+                        x2 = mat_pred2[k, ], x3 = mat_pred3[k, ])
+      
+      if (sum(complete.cases(dat)) >= (.2 * nrow(dat))) {
+        mod <- lm(y ~ x1 + x2 + x3, data = dat)
+        
+        id <- which(!is.na(dat$x1) & !is.na(dat$x2) & !is.na(dat$x3) & is.na(dat$y))
+        newdata <- data.frame(x1 = dat$x1[id], x2 = dat$x2[id], x3 = dat$x3[id])
+        dat$y[id] <- predict(mod, newdata)
+      }
+      
+      return(dat$y)
+    }
+    
+    rst_fill <- raster::setValues(i, mat_fill)
+    
+    lst_fill <- foreach(i = 1:ncol(mat_resp), .packages = "raster") %dopar%
+      raster::writeRaster(rst_fill[[i]], filename = fls_fill[i], 
+                          format = "GTiff", overwrite = TRUE)
   
+    raster::stack(lst_fill)
+  }
+}
