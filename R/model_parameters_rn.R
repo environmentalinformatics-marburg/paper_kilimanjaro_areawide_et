@@ -19,19 +19,23 @@ registerDoParallel(cl)
 rst_ref_utm <- raster("data/MYD09Q1.006/ndvi/NDVI_MYD09Q1.A2013001.sur_refl.tif")
 rst_ref <- trim(projectRaster(rst_ref_utm, crs = "+init=epsg:4326"))
 
+## sensor under investigation
+sensor <- "MOD"
+dir_sensor <- paste0("data/radiation/", sensor)
+
 
 ### atmospheric transmissivity -----
 
 ## solar zenith angle
-fls_theta <- list.files("data/MYD05_L2.006/Solar_Zenith", full.names = TRUE, 
-                        pattern = "Solar_Zenith.tif$")
+fls_theta <- list.files(paste0("data/", sensor, "05_L2.006/Solar_Zenith"), 
+                        full.names = TRUE, pattern = "Solar_Zenith.tif$")
 
 dts_theta <- substr(basename(fls_theta), 11, 22)
 dat_theta <- data.frame(datetime = dts_theta, theta = fls_theta, 
                         stringsAsFactors = FALSE)
 
 ## precipitable water content (modis; cm, i.e. multiply with 10 to get mm)
-fls_ptw <- list.files("data/MYD05_L2.006/Water_Vapor_Near_Infrared/res", 
+fls_ptw <- list.files(paste0("data/", sensor, "05_L2.006/Water_Vapor_Near_Infrared/res"), 
                       full.names = TRUE, pattern = "Near_Infrared.tif$")
 
 # # merge replicate daily scenes
@@ -56,15 +60,15 @@ dts_ptw <- substr(basename(fls_ptw), 23, 34)
 dat_ptw <- data.frame(datetime = dts_ptw, precipitable = fls_ptw, 
                       stringsAsFactors = FALSE)
 
-## air pressure (modis; hPa, i.e. multiply 0.1 to get kPa)
-
-# import available files
-fls_sp <- list.files("data/MYD07_L2.006/Surface_Pressure", full.names = TRUE, 
-                     pattern = "Surface_Pressure.tif$")
-
-dts_sp <- substr(basename(fls_sp), 11, 22)
-dat_sp <- data.frame(datetime = dts_sp, pressure = fls_sp, 
-                     stringsAsFactors = FALSE)
+# ## air pressure (modis; hPa, i.e. multiply 0.1 to get kPa)
+# 
+# # import available files
+# fls_sp <- list.files(paste0("data/", sensor, "07_L2.006/Surface_Pressure"), 
+#                      full.names = TRUE, pattern = "Surface_Pressure.tif$")
+# 
+# dts_sp <- substr(basename(fls_sp), 11, 22)
+# dat_sp <- data.frame(datetime = dts_sp, pressure = fls_sp, 
+#                      stringsAsFactors = FALSE)
 
 ## air pressure (ecmwf; hPa, i.e. multiply 0.1 to get kPa)
 
@@ -80,15 +84,17 @@ dat_sp_ecmwf <- data.frame(date = dts_sp_ecmwf, pressure = fls_sp_ecmwf,
 dat_mrg <- merge(dat_theta, dat_ptw, all = TRUE, by = "datetime")
 dat_mrg$date <- substr(dat_mrg$datetime, 1, 7)
 dat_tau <- merge(dat_mrg, dat_sp_ecmwf, all = TRUE, by = "date")
+dat_tau <- dat_tau[complete.cases(dat_tau), ]
 
 # dat_tau <- Reduce(function(...) merge(..., all = TRUE, by = "datetime"), 
 #                   list(dat_sp, dat_theta, dat_ptw))
 
-dat_tau <- dat_tau[complete.cases(dat_tau), ]
-
+## target folder and files
 fls_tau <- gsub("Solar_Zenith", "Atmospheric_Transmissivity", dat_tau$theta)
-dir_tau <- unique(dirname(fls_tau))
+dir_tau <- paste0(dir_sensor, "/Atmospheric_Transmissivity")
 if (!dir.exists(dir_tau)) dir.create(dir_tau)
+fls_tau <- paste0(dir_tau, "/", basename(fls_tau))
+
 lst_tau <- foreach(i = 1:nrow(dat_tau), .packages = "reset") %dopar% {
   if (file.exists(fls_tau[i])) {
     raster::raster(fls_tau[i])
@@ -107,7 +113,7 @@ lst_tau <- foreach(i = 1:nrow(dat_tau), .packages = "reset") %dopar% {
 }
 
 fls_tau <- list.files(dir_tau, pattern = "Transmissivity.tif", full.names = TRUE)
-rst_tau <- stack(fls_tau)
+rst_tau <- stack(fls_tau); rm(lst_tau)
 dat_tau <- data.frame(datetime = substr(basename(fls_tau), 11, 22), 
                       transmissivity = fls_tau, stringsAsFactors = FALSE)
 
@@ -126,8 +132,8 @@ rst_dem <- raster("data/dem/DEM_ARC1960_30m_Hemp.tif")
 rst_dem <- trim(projectRaster(resample(rst_dem, rst_ref_utm), crs = "+init=epsg:4326"))
 
 ## scan start time
-fls_sst <- list.files("data/MYD05_L2.006/Scan_Start_Time", full.names = TRUE, 
-                      pattern = "Scan_Start_Time.tif$")
+fls_sst <- list.files(paste0("data/", sensor, "05_L2.006/Scan_Start_Time"), 
+                      full.names = TRUE, pattern = "Scan_Start_Time.tif$")
 
 dts_sst <- substr(basename(fls_sst), 11, 22)
 dat_sst <- data.frame(datetime = dts_sst, start_time = fls_sst, 
@@ -145,8 +151,10 @@ for (i in 1:nrow(mat)) mat[i, ] <- lts[i]
 phi <- raster::raster(mat, template = rst)
 
 fls_opt <- gsub("Scan_Start_Time", "Overpass_Time", fls_sst)
-dir_opt <- unique(dirname(fls_opt))
+dir_opt <- paste0(dir_sensor, "/Overpass_Time")
 if (!dir.exists(dir_opt)) dir.create(dir_opt)
+fls_opt <- paste0(dir_opt, "/", basename(fls_opt))
+
 dts_theta <- as.Date(dat_theta[, 1], "%Y%j.%H%M")
 
 lst_opt <- foreach(i = 1:length(fls_theta), .packages = "satellite") %dopar% {
@@ -160,7 +168,7 @@ lst_opt <- foreach(i = 1:length(fls_theta), .packages = "satellite") %dopar% {
 }
 
 ## solar incidence angle
-dir_sia <- "data/MYD05_L2.006/Solar_Incidence_Angle"
+dir_sia <- paste0(dir_sensor, "/Solar_Incidence_Angle")
 if (!dir.exists(dir_sia)) dir.create(dir_sia)
 
 lst_sia <- foreach(i = lst_opt, .packages = "satellite") %dopar% {
@@ -174,9 +182,7 @@ lst_sia <- foreach(i = lst_opt, .packages = "satellite") %dopar% {
   }
 }
 
-fls_sia <- list.files("data/MYD05_L2.006/Solar_Incidence_Angle", 
-                      full.names = TRUE, pattern = "Incidence_Angle.tif")
-
+fls_sia <- list.files(dir_sia, full.names = TRUE, pattern = "Incidence_Angle.tif")
 dts_sia <- substr(basename(fls_sia), 11, 22)
 dat_sia <- data.frame(datetime = dts_sia, incidence = fls_sia, 
                       stringsAsFactors = FALSE)
@@ -190,8 +196,9 @@ dat_rsd <- Reduce(function(...) merge(..., by = "datetime"),
 ## target folder and files
 fls_rsd <- gsub("Solar_Incidence_Angle", "Shortwave_Downward_Radiation", 
                 dat_rsd$incidence)
-dir_rsd <- unique(dirname(fls_rsd))
+dir_rsd <- paste0(dir_sensor, "/Shortwave_Downward_Radiation")
 if (!dir.exists(dir_rsd)) dir.create(dir_rsd)
+fls_rsd <- paste0(dir_rsd, "/", basename(fls_rsd))
 
 ## compute per-scene shortwave downward radiation
 lst_rsd <- foreach(i = 1:nrow(dat_rsd), .packages = "reset") %dopar% {
@@ -206,24 +213,23 @@ lst_rsd <- foreach(i = 1:nrow(dat_rsd), .packages = "reset") %dopar% {
                         format = "GTiff", overwrite = TRUE)  
   }
 }
-rst_rsd <- stack(lst_rsd)
+rst_rsd <- stack(lst_rsd); rm(lst_rsd)
 
 ## 8-day aggregation
-fls_rsd <- list.files("data/MYD05_L2.006/Shortwave_Downward_Radiation", 
-                      full.names = TRUE, pattern = "Shortwave_Downward_Radiation.tif")
-
+fls_rsd <- list.files(dir_rsd, full.names = TRUE, pattern = ".tif")
 dts_rsd <- substr(basename(fls_rsd), 11, 22)
 dat_rsd <- data.frame(datetime = dts_rsd, swdr = fls_rsd, 
                       stringsAsFactors = FALSE)
 
-dir_agg <- "data/MYD05_L2.006/Shortwave_Downward_Radiation/agg"
-if (!dir.exists(dir_agg)) dir.create(dir_agg)
+dir_rsd_agg <- paste0(dir_rsd, "/agg")
+if (!dir.exists(dir_rsd_agg)) dir.create(dir_rsd_agg)
 
 lst_rsd_agg <- lapply(2013:2015, function(i) {
   dat <- dat_rsd[grep(i, dts_rsd), ]
-  fls_agg <- paste0(dir_agg, "/Shortwave_Downward_Radiation_", 
-                    unique(strftime(cut(as.Date(dat$datetime, "%Y%j.%H%M"), 
-                                        "8 days"), "%Y%j")), ".tif")
+  
+  dly <- seq(as.Date(paste0(i, "-01-01")), as.Date(paste0(i, "-12-31")), 1)
+  fls_agg <- paste0(dir_rsd_agg, "/Shortwave_Downward_Radiation_", 
+                    unique(strftime(cut(dly, "8 days"), "%Y%j")), ".tif")
   
   if (all(file.exists(fls_agg))) {
     raster::stack(fls_agg)
@@ -239,11 +245,9 @@ lst_rsd_agg <- lapply(2013:2015, function(i) {
   }
 })
 
-rst_rsd_agg <- stack(lst_rsd_agg)
+rst_rsd_agg <- stack(lst_rsd_agg); rm(lst_rsd_agg)
 
-fls_rsd_agg <- list.files("data/MYD05_L2.006/Shortwave_Downward_Radiation/agg", 
-                          pattern = "^Shortwave.*.tif$", full.names = TRUE)
-
+fls_rsd_agg <- list.files(dir_rsd_agg, pattern = ".tif$", full.names = TRUE)
 dts_rsd_agg <- substr(sapply(strsplit(basename(fls_rsd_agg), "_"), "[[", 4), 1, 7)
 dat_rsd_agg <- data.frame(datetime = dts_rsd_agg, swdr_agg = fls_rsd_agg, 
                           stringsAsFactors = FALSE)
@@ -255,16 +259,28 @@ dat_rsd_agg <- data.frame(datetime = dts_rsd_agg, swdr_agg = fls_rsd_agg,
 fls_alpha <- list.files("data/MCD43A3.005/crp", full.names = TRUE, 
                         pattern = "^MCD43A3.*shortwave.tif$")
 rst_alpha <- stack(fls_alpha)
-rst_alpha <- resample(rst_alpha, rst_ref_utm)
+
+fls_alpha_res <- gsub("/crp/", "/res/", fls_alpha)
+
+lst_alpha <- foreach(i = 1:nlayers(rst_alpha), .packages = "raster") %dopar% {
+  if (file.exists(fls_alpha_res[i])) {
+    raster::raster(fls_alpha_res[i])
+  } else {
+    raster::resample(rst_alpha[[i]], rst_ref_utm, filename = fls_alpha_res[i], 
+                     format = "GTiff", overwrite = TRUE)
+  }
+}
+
+rst_alpha <- stack(lst_alpha); rm(lst_alpha)
 
 dts_alpha <- substr(basename(fls_alpha), 10, 16)
-dat_alpha <- data.frame(datetime = dts_alpha, albedo = fls_alpha, 
+dat_alpha <- data.frame(datetime = dts_alpha, albedo = fls_alpha_res, 
                         stringsAsFactors = FALSE)
 
 ## shortwave upward radiation
 dat_rsu <- merge(dat_alpha, dat_rsd_agg, by = "datetime")
 
-dir_rsu <- "data/MCD43A3.005/Shortwave_Upward_Radiation"
+dir_rsu <- paste0(dir_sensor, "/Shortwave_Upward_Radiation")
 if (!dir.exists(dir_rsu)) dir.create(dir_rsu)
 
 fls_rsu <- gsub("Albedo_WSA_shortwave", "Shortwave_Upward_Radiation", dat_rsu$albedo)
@@ -279,20 +295,16 @@ lst_rsu <- foreach(i = 1:nrow(dat_rsu), .packages = "raster") %dopar% {
         raster::raster(dat_rsu$swdr[i]), crs = "+init=epsg:21037")
       , rst_ref_utm)
     
-    albedo <- raster::resample(
-      raster::raster(dat_rsu$albedo[i])
-      , rst_ref_utm)
-    
+    albedo <- raster::raster(dat_rsu$albedo[i])
+
     raster::overlay(swdr, albedo, fun = function(x, y) y * x, 
                     filename = fls_rsu[i], format = "GTiff", overwrite = TRUE)
   }
 }
   
-rst_rsu <- stack(lst_rsu)
+rst_rsu <- stack(lst_rsu); rm(lst_rsu)
 
-fls_rsu_agg <- list.files("data/MCD43A3.005/Shortwave_Upward_Radiation", 
-                          pattern = "Shortwave.*.tif$", full.names = TRUE)
-
+fls_rsu_agg <- list.files(dir_rsu, pattern = ".tif$", full.names = TRUE)
 dts_rsu_agg <- substr(sapply(strsplit(basename(fls_rsu_agg), "\\."), "[[", 2), 2, 8)
 dat_rsu_agg <- data.frame(datetime = dts_rsu_agg, swur_agg = fls_rsu_agg, 
                           stringsAsFactors = FALSE)
@@ -300,13 +312,27 @@ dat_rsu_agg <- data.frame(datetime = dts_rsu_agg, swur_agg = fls_rsu_agg,
 
 ### land surface temperature -----
 
-fls_lst <- list.files("data/MYD11A2.005/qc", full.names = TRUE, 
-                        pattern = "^MYD11A2.*Day_1km.tif$")
+fls_lst <- list.files(paste0("data/", sensor, "11A2.005/gf"), full.names = TRUE, 
+                      pattern = "Day_1km.tif$")
 rst_lst <- stack(fls_lst)
-rst_lst <- resample(rst_lst, rst_ref_utm)
+
+fls_lst_res <- gsub("/gf/", "/res/", fls_lst)
+dir_lst_res <- unique(dirname(fls_lst_res))
+if (!dir.exists(dir_lst_res)) dir.create(dir_lst_res)
+
+lst_lst <- foreach(i = 1:nlayers(rst_lst), .packages = "raster") %dopar% {
+  if (file.exists(fls_lst_res[i])) {
+    raster::raster(fls_lst_res[i])
+  } else {
+    raster::resample(rst_lst[[i]], rst_ref_utm, filename = fls_lst_res[i], 
+                     format = "GTiff", overwrite = TRUE)
+  }
+}
+
+rst_lst <- stack(rst_lst); rm(lst_lst)
 
 dts_lst <- substr(basename(fls_lst), 10, 16)
-dat_lst <- data.frame(datetime = dts_lst, lst = fls_lst, 
+dat_lst <- data.frame(datetime = dts_lst, lst = fls_lst_res, 
                       stringsAsFactors = FALSE)
 
 
