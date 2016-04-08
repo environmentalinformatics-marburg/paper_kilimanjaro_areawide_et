@@ -6,7 +6,7 @@ uniformExtent <- function(f = 1e3, ...) {
 
   ## import plot coordinates
   suppressWarnings(
-    spt_plots <- readOGR("data/shp/", "PlotPoles_ARC1960_mod_20140807_final",
+    spt_plots <- readOGR("data/shp", "PlotPoles_ARC1960_mod_20140807_final",
                          p4s = "+init=epsg:21037", ...)
   )
 
