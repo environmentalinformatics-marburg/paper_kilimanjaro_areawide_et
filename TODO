@@ -1,0 +1,25 @@
+Daily
+- MOD05_L2
+- ECMWF
+(-> Atmospheric Transmissivity)
+(-> Earth-Sun Distance)
+(-> Shortwave Downward Radiation)
+- MCD43A3.006 <-> currently downloading
+(-> Shortwave Upward Radiation)
+- MYD11A1.005 <-> needs to be downloaded
+- MOD09GQ.006 <-> needs to be downloaded
+- Modified 1-day MCD15A3H.006 <-> needs to be downloaded and downscaled
+(-> Surface Emissivity)
+(-> Longwave Upward Radiation)
+(-> Atmospheric Emissivity)
+(-> Longwave Downward Radiation)
+
+4-day
+- MCD15A3H.006 <-> needs to be downloaded; could be temporally downscaled to a 
+  1-day coverage via MOD09GQ.006 (NDVI)
+
+8-day, 16-day
+- MCD43A3.005 <-> is available on a daily basis from Collection 6 onwards
+- MYD11A2.005 <-> should be replaced by MYD11A1.005 that comes on a daily basis
+- MOD09Q1.006 <-> should be replaced by MOD09GQ.006 that comes on a daily basis
+- MCD15A2H.006 <-> could be replaced by MCD15A3H.006 that comes on a 4-day basis
