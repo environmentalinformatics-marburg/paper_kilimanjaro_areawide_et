@@ -8,7 +8,7 @@ lib <- c("reset", "satellite", "doParallel")
 Orcs::loadPkgs(lib)
 
 ## set working directory
-Orcs::setwdOS(path_lin = "/media/fdetsch/XChange/", path_win = "D:/",
+Orcs::setwdOS(path_lin = "/media/fdetsch/XChange/", path_win = "F:/",
               path_ext = "kilimanjaro/evapotranspiration/")
 
 ## parallelization
@@ -283,7 +283,8 @@ dat_rsu <- merge(dat_alpha, dat_rsd_agg, by = "datetime")
 dir_rsu <- paste0(dir_sensor, "/Shortwave_Upward_Radiation")
 if (!dir.exists(dir_rsu)) dir.create(dir_rsu)
 
-fls_rsu <- gsub("Albedo_WSA_shortwave", "Shortwave_Upward_Radiation", dat_rsu$albedo)
+fls_rsu <- gsub("Shortwave_Downward_Radiation", "Shortwave_Upward_Radiation", 
+                dat_rsu$swdr_agg)
 fls_rsu <- paste0(dir_rsu, "/", basename(fls_rsu))
 
 lst_rsu <- foreach(i = 1:nrow(dat_rsu), .packages = "raster") %dopar% {
@@ -305,18 +306,18 @@ lst_rsu <- foreach(i = 1:nrow(dat_rsu), .packages = "raster") %dopar% {
 rst_rsu <- stack(lst_rsu); rm(lst_rsu)
 
 fls_rsu_agg <- list.files(dir_rsu, pattern = ".tif$", full.names = TRUE)
-dts_rsu_agg <- substr(sapply(strsplit(basename(fls_rsu_agg), "\\."), "[[", 2), 2, 8)
+dts_rsu_agg <- substr(sapply(strsplit(basename(fls_rsu_agg), "_"), "[[", 4), 1, 7)
 dat_rsu_agg <- data.frame(datetime = dts_rsu_agg, swur_agg = fls_rsu_agg, 
                           stringsAsFactors = FALSE)
 
 
 ### land surface temperature -----
 
-fls_lst <- list.files(paste0("data/", sensor, "11A2.005/gf"), full.names = TRUE, 
+fls_lst <- list.files(paste0("data/", sensor, "11A2.005/qc"), full.names = TRUE, 
                       pattern = "Day_1km.tif$")
 rst_lst <- stack(fls_lst)
 
-fls_lst_res <- gsub("/gf/", "/res/", fls_lst)
+fls_lst_res <- gsub("/qc/", "/res/", fls_lst)
 dir_lst_res <- unique(dirname(fls_lst_res))
 if (!dir.exists(dir_lst_res)) dir.create(dir_lst_res)
 
@@ -329,7 +330,7 @@ lst_lst <- foreach(i = 1:nlayers(rst_lst), .packages = "raster") %dopar% {
   }
 }
 
-rst_lst <- stack(rst_lst); rm(lst_lst)
+rst_lst <- stack(lst_lst); rm(lst_lst)
 
 dts_lst <- substr(basename(fls_lst), 10, 16)
 dat_lst <- data.frame(datetime = dts_lst, lst = fls_lst_res, 
@@ -339,8 +340,8 @@ dat_lst <- data.frame(datetime = dts_lst, lst = fls_lst_res,
 ### broadband surface emissivity -----
 
 ## ndvi
-fls_ndvi <- list.files("data/MYD09Q1.006/ndvi", full.names = TRUE, 
-                      pattern = "^NDVI_MYD09Q1.*.tif$")
+fls_ndvi <- list.files("data/MCD09Q1.006/ndvi", full.names = TRUE, 
+                       pattern = "^NDVI_MCD09Q1.*.tif$")
 rst_ndvi <- stack(fls_ndvi)
 
 dts_ndvi <- substr(basename(fls_ndvi), 15, 21)
@@ -348,10 +349,24 @@ dat_ndvi <- data.frame(datetime = dts_ndvi, ndvi = fls_ndvi,
                       stringsAsFactors = FALSE)
 
 ## lai
-fls_lai <- list.files("data/MCD15A2H.006/qc2", full.names = TRUE, 
+fls_lai <- list.files("data/MCD15A2H.006/gf", full.names = TRUE, 
                        pattern = "^MCD15A2H.*.tif$")
 rst_lai <- stack(fls_lai)
-rst_lai <- resample(rst_lai, rst_ndvi[[1]])
+
+fls_lai_res <- gsub("/gf/", "/res/", fls_lai)
+dir_lai_res <- unique(dirname(fls_lai_res))
+if (!dir.exists(dir_lai_res)) dir.create(dir_lai_res)
+
+lst_lai <- foreach(i = 1:nlayers(rst_lai), .packages = "raster") %dopar% {
+  if (file.exists(fls_lai_res[i])) {
+    raster::raster(fls_lai_res[i])
+  } else {
+    raster::resample(rst_lai[[i]], rst_ref_utm, filename = fls_lai_res[i], 
+                     format = "GTiff", overwrite = TRUE)
+  }
+}
+
+rst_lai <- stack(rst_lai); rm(lst_lai)
 
 dts_lai <- substr(basename(fls_lai), 11, 17)
 dat_lai <- data.frame(datetime = dts_lai, lai = fls_lai, 
@@ -362,7 +377,7 @@ dir_es <- "data/MCD15A2H.006/Surface_Emissivity"
 if (!dir.exists(dir_es)) dir.create(dir_es)
 
 fls_es <- gsub("Lai", "Surface_Emissivity", names(rst_lai))
-fls_es <- paste0(dir_es, "/", fls_es)
+fls_es <- paste0(dir_es, "/", fls_es, ".tif")
 
 lst_es <- foreach(i = 1:nlayers(rst_ndvi), j = fls_es, 
                    .packages = "reset") %dopar% {
@@ -374,18 +389,16 @@ lst_es <- foreach(i = 1:nlayers(rst_ndvi), j = fls_es,
   }
 }
 
-rst_es <- stack(lst_es)
+rst_es <- stack(lst_es); rm(lst_es)
 
-fls_es_agg <- list.files(dir_es, pattern = "Surface_Emissivity.*.tif$", 
-                         full.names = TRUE)
-dts_es_agg <- substr(sapply(strsplit(basename(fls_es_agg), "\\."), "[[", 2), 2, 8)
-dat_es_agg <- data.frame(datetime = dts_es_agg, emis_surf = fls_es_agg, 
-                         stringsAsFactors = FALSE)
+dts_es <- substr(sapply(strsplit(basename(fls_es), "\\."), "[[", 2), 2, 8)
+dat_es <- data.frame(datetime = dts_es, emis_surf = fls_es, 
+                     stringsAsFactors = FALSE)
 
 
 ### longwave upward radiation -----
 
-dir_lwur <- "data/MCD15A2H.006/Longwave_Upward_Radiation"
+dir_lwur <- paste0(dir_sensor, "/Longwave_Upward_Radiation")
 if (!dir.exists(dir_lwur)) dir.create(dir_lwur)
 
 fls_lwur <- gsub("Surface_Emissivity", "Longwave_Upward_Radiation", names(rst_es))
@@ -401,10 +414,10 @@ lst_lwur <- foreach(i = 1:nlayers(rst_lst), j = fls_lwur,
   }
 }
 
-rst_lwur <- stack(lst_lwur)
+rst_lwur <- stack(lst_lwur); rm(lst_lwur)
 
-fls_rlu_agg <- list.files("data/MCD15A2H.006/Longwave_Upward_Radiation", 
-                          pattern = "Longwave.*.tif$", full.names = TRUE)
+fls_rlu_agg <- list.files(dir_lwur, pattern = "Longwave.*.tif$", 
+                          full.names = TRUE)
 
 dts_rlu_agg <- substr(sapply(strsplit(basename(fls_rlu_agg), "\\."), "[[", 2), 2, 8)
 dat_rlu_agg <- data.frame(datetime = dts_rlu_agg, lwur_agg = fls_rlu_agg, 
@@ -427,40 +440,48 @@ lst_ea <- foreach(i = 1:length(fls_ea), .packages = c("raster", "reset")) %dopar
   }
 }
 
-rst_ea <- stack(lst_ea)
+rst_ea <- stack(lst_ea); rm(lst_ea)
 
 ## 8-day aggregation
-fls_ea <- list.files("data/MYD05_L2.006/Atmospheric_Emissivity", 
-                     full.names = TRUE, pattern = "Atmospheric_Emissivity")
+fls_ea <- list.files(dir_ea, full.names = TRUE, 
+                     pattern = "Atmospheric_Emissivity")
 
 dts_ea <- substr(basename(fls_ea), 11, 22)
 dat_ea <- data.frame(datetime = dts_ea, emissivity = fls_ea, 
                      stringsAsFactors = FALSE)
 
-dir_ea_agg <- "data/MYD05_L2.006/Atmospheric_Emissivity/agg"
+dir_ea_agg <- paste0(dir_ea, "/agg")
 if (!dir.exists(dir_ea_agg)) dir.create(dir_ea_agg)
 
-lst_ea_agg <- lapply(2013:2015, function(i) {
+lst_ea_agg <- foreach(i = 2013:2015, .packages = "raster") %dopar% {
   dat <- dat_ea[grep(i, dts_ea), ]
+  
+  rcl <- data.frame(datetime = seq(as.Date(paste0(i, "-01-01")), 
+                                   as.Date(paste0(i, "-12-31")), 1))
+  rcl <- transform(rcl, cut = strftime(cut(datetime, "8 days"), format = "%Y%j"))
+  rcl$datetime <- strftime(rcl$datetime, format = "%Y%j")
+                    
   fls_agg <- paste0(dir_ea_agg, "/Atmospheric_Emissivity_", 
-                    unique(strftime(cut(as.Date(dat$datetime, "%Y%j.%H%M"), 
-                                        "8 days"), "%Y%j")), ".tif")
+                    unique(rcl$cut), ".tif")
   
   if (all(file.exists(fls_agg))) {
     raster::stack(fls_agg)
   } else {
-    id <- as.numeric(cut(as.Date(dat$datetime, "%Y%j.%H%M"), "8 days"))
+    id <- as.numeric(sapply(substr(dat$datetime, 1, 7), function(k) {
+      rcl[grep(k, rcl$datetime), "cut"]
+    }))
     rst <- raster::stackApply(raster::stack(dat$emissivity), id, fun = mean)
     
-    lst_agg <- foreach(j = 1:nlayers(rst)) %do% 
+    lst_agg <- lapply(1:nlayers(rst), function(j) { 
       raster::writeRaster(rst[[j]], filename = fls_agg[j], 
                           format = "GTiff", overwrite = TRUE)
+    })
     
     raster::stack(lst_agg)
   }
-})
+}
 
-rst_ea_agg <- stack(lst_ea_agg)
+rst_ea_agg <- stack(lst_ea_agg); rm(lst_ea_agg)
 
 fls_ea_agg <- list.files(dir_ea_agg, pattern = "^Atmospheric_Emissivity.*.tif$", 
                          full.names = TRUE)
@@ -472,29 +493,30 @@ dat_ea_agg <- data.frame(datetime = dts_ea_agg, emissivity_agg = fls_ea_agg,
 dat_rld <- merge(dat_ea_agg, dat_lst, by = "datetime")
 fls_rld <- gsub("Atmospheric_Emissivity", "Longwave_Downward_Radiation", 
                 dat_ea_agg$emissivity_agg)
+fls_rld <- gsub("/agg", "", fls_rld)
 dir_rld <- unique(dirname(fls_rld))
 if (!dir.exists(dir_rld)) dir.create(dir_rld)
 
 lst_rld <- foreach(i = 1:nrow(dat_rld), .packages = c("raster", "reset")) %dopar% {
   if (file.exists(fls_rld[i])) {
-    raster::raster(fls_rld[i])
+    raster(fls_rld[i])
   } else {
-    ea <- raster::raster(dat_rld$emissivity_agg[i])
-    ea <- raster::projectRaster(ea, crs = "+init=epsg:21037")
-    ea <- raster::resample(ea, rst_ref_utm)
+    ea <- raster(dat_rld$emissivity_agg[i])
+    ea <- projectRaster(ea, crs = "+init=epsg:21037")
+    ea <- resample(ea, rst_ref_utm)
     
-    lst <- raster::raster(dat_rld$lst[i])
-    lst <- raster::resample(lst, rst_ref_utm)
+    lst <- raster(dat_rld$lst[i])
+    lst <- resample(lst, rst_ref_utm)
     
     lwdr(ea, ta = lst, filename = fls_rld[i], 
          format = "GTiff", overwrite = TRUE)
   }
 }
 
-rst_rld <- stack(lst_rld)
+rst_rld <- stack(lst_rld); rm(lst_rld)
 
-fls_rld_agg <- list.files("data/MYD05_L2.006/Longwave_Downward_Radiation/agg", 
-                          pattern = "Longwave.*.tif$", full.names = TRUE)
+fls_rld_agg <- list.files(dir_rld, pattern = "Longwave.*.tif$", 
+                          full.names = TRUE)
 
 dts_rld_agg <- substr(sapply(strsplit(basename(fls_rld_agg), "_"), "[[", 4), 1, 7)
 dat_rld_agg <- data.frame(datetime = dts_rld_agg, lwdr_agg = fls_rld_agg, 
@@ -528,9 +550,9 @@ dat_rld_agg <- data.frame(datetime = dts_rld_agg, lwdr_agg = fls_rld_agg,
 ## R_n (net radiation)
 
 dat_rn <- Reduce(function(...) merge(..., by = "datetime"), 
-                 list(dat_rsd_agg, dat_rsu_agg, dat_rld_agg, dat_es_agg, dat_rlu_agg))
+                 list(dat_rsd_agg, dat_rsu_agg, dat_rld_agg, dat_es, dat_rlu_agg))
 
-fls_rn <- gsub("Longwave_Upward", "Net", fls_rlu_agg)
+fls_rn <- gsub("Longwave_Upward", "Net", dat_rn$lwur_agg)
 dir_rn <- unique(dirname(fls_rn))
 if (!dir.exists(dir_rn)) dir.create(dir_rn)
 
