@@ -6,8 +6,8 @@ Daily
 (-> Shortwave Downward Radiation)
 - MCD43A3.006 <-> currently missing from early 2015 onwards
 (-> Shortwave Upward Radiation)
-- MOD/MYD11A1.005 <-> downloaded, needs to be processed
-- MOD/MYD09GQ.006 <-> downloaded/currently downloading, needs to be processed
+- MOD/MYD11A1.005 <-> downloaded and extracted, needs to be processed
+- MOD/MYD09GQ.006 <-> downloaded and extracted, needs to be processed
 - Modified 1-day MCD15A3H.006 <-> needs to be downscaled
 (-> Surface Emissivity)
 (-> Longwave Upward Radiation)
@@ -16,9 +16,5 @@ Daily
 
 4-day
 - MCD15A3H.006 <-> downloaded, needs to be processed; could be interpolated 
-  towards a 1-day spatial coverage via MOD/MYD09GQ.006 (NDVI)
-
-8-day, 16-day
-- MYD11A2.005 <-> should be replaced by MYD11A1.005 that comes on a daily basis
-- MOD09Q1.006 <-> should be replaced by MOD09GQ.006 that comes on a daily basis
-- MCD15A2H.006 <-> could be replaced by MCD15A3H.006 that comes on a 4-day basis
+  towards a 1-day spatial coverage via MOD/MYD09GQ.006 (NDVI); for now, simply 
+  replicated each 4-day scene three times
