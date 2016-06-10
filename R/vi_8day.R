@@ -35,7 +35,11 @@ lst <- lapply(c("MOD09Q1", "MYD09Q1"), function(product) {
   
   ## reference extent
   ext_crop <- uniformExtent()
-  
+
+  ## target folder
+  dir_crp <- paste0("data/", product, ".006/crp")
+  if (!dir.exists(dir_crp)) dir.create(dir_crp)
+
   # ## perform crop
   # rst_crp <- foreach(i = c("b01", "b02", "state_250m", "qc_250m"),
   #                    .packages = "MODIS") %dopar% {
@@ -46,10 +50,7 @@ lst <- lapply(c("MOD09Q1", "MYD09Q1"), function(product) {
   #   rst <- raster::stack(fls)
   #   
   #   # crop
-  #   dir_out <- paste0("data/", product, ".006/crp")
-  #   if (!dir.exists(dir_out)) dir.create(dir_out)
-  #                      
-  #   fls_out <- paste(dir_out, basename(fls), sep = "/")
+  #   fls_out <- paste(dir_crp, basename(fls), sep = "/")
   #   rst_out <- raster::crop(rst, ext_crop, snap = "out")
   #   
   #   # if dealing with band 1 or band 2, apply scale factor
@@ -72,12 +73,12 @@ lst <- lapply(c("MOD09Q1", "MYD09Q1"), function(product) {
   # }
   
   ## reimport cropped files
-  rst_crp <- foreach(i = c("b01", "b02", "state_250m", "qc_250m")) %do% {
+  rst_crp <- foreach(i = c("b01", "b02", "state_250m", "qc_250m"), 
+                     .packages = "raster") %dopar% {
     
     # list and import available files
-    dir_crp <- paste0("data/", product, ".006/crp")
     fls_crp <- list.files(dir_crp, pattern = paste0(i, ".tif$"), full.names = TRUE)
-    raster::stack(fls_crp)
+    stack(fls_crp)
   }
   
   
@@ -123,9 +124,9 @@ lst <- lapply(c("MOD09Q1", "MYD09Q1"), function(product) {
   # }
   
   ## reimport step #1 quality-controlled files
-  lst_qc1 <- foreach(i = c("b01", "b02")) %do% {
+  lst_qc1 <- foreach(i = c("b01", "b02"), .packages = "raster") %dopar% {
     fls_qc1 <- list.files(dir_qc1, pattern = paste0(i, ".tif$"), full.names = TRUE)
-    raster::stack(fls_qc1)
+    stack(fls_qc1)
   }
   
   
@@ -164,9 +165,9 @@ lst <- lapply(c("MOD09Q1", "MYD09Q1"), function(product) {
   # }
   
   ## reimport step #2 quality-controlled files
-  lst_qc2 <- foreach(i = c("b01", "b02")) %do% {
+  lst_qc2 <- foreach(i = c("b01", "b02"), .packages = "raster") %dopar% {
     fls_qc2 <- list.files(dir_qc2, pattern = paste0(i, ".tif$"), full.names = TRUE)
-    raster::stack(fls_qc2)
+    stack(fls_qc2)
   }
   
   

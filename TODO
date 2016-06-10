@@ -6,8 +6,10 @@ Daily
 (-> Shortwave Downward Radiation)
 - MCD43A3.006 <-> currently missing from early 2015 onwards
 (-> Shortwave Upward Radiation)
-- MOD/MYD11A1.005 <-> downloaded and extracted, needs to be processed
-- MOD/MYD09GQ.006 <-> downloaded and extracted, needs to be processed
+- MOD/MYD11A1.005
+- MOD/MYD09GQ.006 <-> downloaded and extracted, quality control #1 performed, 
+  now requires quality control #2 based on MOD/MYD09GA.006
+- MOD/MYD09GA.006 <-> downloaded and extracted, needs to be processed
 - Modified 1-day MCD15A3H.006 <-> needs to be downscaled
 (-> Surface Emissivity)
 (-> Longwave Upward Radiation)
