@@ -7,10 +7,11 @@ rm(list = ls(all = TRUE))
 source("R/uniformExtent.R")
 
 ## set working directory
-Orcs::setwdOS(path_lin = "/media/fdetsch/modis_data/", path_win = "D:/")
+Orcs::setwdOS(path_lin = "/media/fdetsch/XChange/", path_win = "H:/", 
+              path_ext = "kilimanjaro/evapotranspiration")
 
 ## load packages
-lib <- c("raster", "MODIS", "Rsenal", "rgdal", "doParallel")
+lib <- c("raster", "MODIS", "Rsenal", "rgdal", "doParallel", "reset")
 Orcs::loadPkgs(lib)
 
 ## parallelization
@@ -79,21 +80,21 @@ lst <- lapply(c("MOD09GQ", "MYD09GQ"), function(product) {
   # 
   #   raster::stack(lst_out)
   # }
-   
-  ## reimport cropped files
-  rst_crp <- foreach(i = c("b01", "b02", "QC_250m"), 
-                     .packages = "raster") %dopar% {
-                       
-    # list and import available files
-    fls_crp <- list.files(dir_crp, pattern = paste0(i, ".*.tif$"), full.names = TRUE)
-    stack(fls_crp)
-  }
-  
+  #  
+  # ## reimport cropped files
+  # rst_crp <- foreach(i = c("b01", "b02", "QC_250m"), 
+  #                    .packages = "raster") %dopar% {
+  #                      
+  #   # list and import available files
+  #   fls_crp <- list.files(dir_crp, pattern = paste0(i, ".*.tif$"), full.names = TRUE)
+  #   stack(fls_crp)
+  # }
+  # 
   # ## quality information
   # product_qa <- ifelse(product == "MOD09GQ", "MOD09GA", "MYD09GA")                   
   # fls_qa <- list.files(paste0(getOption("MODIS_outDirPath"), "/", product_qa, ".006"),
   #                      pattern = "state_1km.*.tif$", full.names = TRUE)
-  # rst_qa <- raster::stack(fls_qa)
+  # rst_qa <- stack(fls_qa)
   # 
   # # crop
   # fls_qa_crp <- paste(dir_crp, basename(fls_qa), sep = "/")
@@ -107,20 +108,20 @@ lst <- lapply(c("MOD09GQ", "MYD09GQ"), function(product) {
   #   writeRaster(rst_qa_crp[[j]], filename = fls_qa_crp[j],
   #               format = "GTiff", overwrite = TRUE)
   # ))
-  
-  ## reimport cropped quality images
-  fls_qa_crp <- list.files(dir_crp, pattern = "state_1km.*.tif$", full.names = TRUE)
-  rst_qa_crp <- stack(fls_qa_crp)
-
-  
+  # 
+  # ## reimport cropped quality images
+  # fls_qa_crp <- list.files(dir_crp, pattern = "state_1km.*.tif$", full.names = TRUE)
+  # rst_qa_crp <- stack(fls_qa_crp)
+  # 
+  # 
   ### quality control -----
   ### discard cloudy pixels based on companion quality information ('QC_250m')
-  
+
   dir_qc <- paste0("data/", product, ".006/qc")
   if (!dir.exists(dir_qc)) dir.create(dir_qc)
-  
+
   # # perform quality check #1 for each band separately
-  # lst_qc <- foreach(i = rst_crp[1:2]) %do% {
+  # lst_qc1 <- foreach(i = rst_crp[1:2]) %do% {
   # 
   #   ## loop over layers
   #   lst_out <- foreach(j = 1:nlayers(i), .packages = lib) %dopar% {
@@ -159,70 +160,68 @@ lst <- lapply(c("MOD09GQ", "MYD09GQ"), function(product) {
   #   
   #   raster::stack(lst_out)
   # }
-  
+
   ## reimport step #1 quality-controlled files
   lst_qc1 <- foreach(i = c("b01", "b02"), .packages = "raster") %dopar% {
     fls_qc1 <- list.files(dir_qc, pattern = paste0(i, ".*.tif$"), full.names = TRUE)
     stack(fls_qc1)
   }
-  
-  
+
+
   ### quality control, step #2: ------------------------------------------------
   ### discard cloudy pixels based on 'state_250m' flags
-  
+
   dir_qc2 <- paste0("data/", product, ".006/qc2")
   if (!dir.exists(dir_qc2)) dir.create(dir_qc2)
-  
-  ## perform quality check #2 for each band separately
-  lst_qc2 <- foreach(i = lst_qc1) %do% {
 
-    ## loop over layers
-    lst_out <- foreach(j = 1:nlayers(i), .packages = lib) %dopar% {
-      fls_qc2 <- paste0(dir_qc2, "/", names(i[[j]]), ".tif")
-      if (file.exists(fls_qc2)) {
-        raster(fls_qc2)
-      } else {
-        rst_qa_res <- resample(rst_qa_crp[[j]], i[[j]], method = "ngb")
-        overlay(i[[j]], rst_qa_res, fun = function(x, y) {
-          id <- sapply(y[], function(k) {
-            bin <- number2binary(k, 16, TRUE)
-            cloud_state <- substr(bin, 15, 16) %in% c("00", "11", "10")
-            cloud_shadow <- substr(bin, 14, 14) == "0"
-            cirrus <- substr(bin, 7, 8) %in% c("00", "01")
-            intern_cloud <- substr(bin, 6, 6) == "0"
-            fire <- substr(bin, 5, 5) == "0"
-            snow <- substr(bin, 4, 4) == "0"
-            intern_snow <- substr(bin, 1, 1) == "0"
-            
-            all(cloud_state, cloud_shadow, cirrus, intern_cloud,
-                fire, snow, intern_snow)
-          })
-          
-          x[!id] <- NA
-          return(x)
-        }, filename = fls_qc2, overwrite = TRUE, format = "GTiff")
-      }
-    }
+  # ## perform quality check #2 for each band separately
+  # lst_qc2 <- foreach(i = lst_qc1) %do% {
+  # 
+  #   ## loop over layers
+  #   stack(foreach(j = 1:nlayers(i), .packages = lib) %dopar% {
+  #     fls_qc2 <- paste0(dir_qc2, "/", names(i[[j]]), ".tif")
+  #     if (file.exists(fls_qc2)) {
+  #       raster(fls_qc2)
+  #     } else {
+  #       rst_qa_res <- resample(rst_qa_crp[[j]], i[[j]], method = "ngb")
+  #       overlay(i[[j]], rst_qa_res, fun = function(x, y) {
+  #         id <- sapply(y[], function(k) {
+  #           bin <- number2binary(k, 16, TRUE)
+  #           cloud_state <- substr(bin, 15, 16) %in% c("00", "11", "10")
+  #           cloud_shadow <- substr(bin, 14, 14) == "0"
+  #           cirrus <- substr(bin, 7, 8) %in% c("00", "01")
+  #           intern_cloud <- substr(bin, 6, 6) == "0"
+  #           fire <- substr(bin, 5, 5) == "0"
+  #           snow <- substr(bin, 4, 4) == "0"
+  #           intern_snow <- substr(bin, 1, 1) == "0"
+  #           
+  #           all(cloud_state, cloud_shadow, cirrus, intern_cloud,
+  #               fire, snow, intern_snow)
+  #         })
+  #         
+  #         x[!id] <- NA
+  #         return(x)
+  #       }, filename = fls_qc2, overwrite = TRUE, format = "GTiff")
+  #     }
+  #   })
+  # }
 
-    raster::stack(lst_out)
-  }
-  
   ## reimport step #2 quality-controlled files
-  lst_qc2 <- foreach(i = c("b01", "b02")) %do% {
-    fls_qc2 <- list.files(dir_qc2, pattern = paste0(i, ".tif$"), full.names = TRUE)
-    raster::stack(fls_qc2)
+  lst_qc2 <- foreach(i = c("b01", "b02"), .packages = "raster") %dopar% {
+    fls_qc2 <- list.files(dir_qc2, pattern = paste0(i, ".*.tif$"), full.names = TRUE)
+    stack(fls_qc2)
   }
-  
-  
+
+
   ### quality control, step #3: ------------------------------------------------
   ### discard pixels adjacent to clouds
-  
+
   dir_qc3 <- paste0("data/", product, ".006/qc3")
   if (!dir.exists(dir_qc3)) dir.create(dir_qc3)
-  
+
   ## perform quality check #3 for each band separately
   lst_qc3 <- foreach(i = lst_qc2) %do% {
-    raster::stack(foreach(j = unstack(i), .packages = "raster") %dopar% {
+    stack(foreach(j = unstack(i), .packages = "raster") %dopar% {
       fls_qc3 <- paste0(dir_qc3, "/", names(j), ".tif")
       if (file.exists(fls_qc3)) {
         raster::raster(fls_qc3)
@@ -230,30 +229,13 @@ lst <- lapply(c("MOD09GQ", "MYD09GQ"), function(product) {
         rst_msk <- raster::focal(j, w = matrix(1, 3, 3), fun = function(x) {
           any(is.na(x[c(2, 4, 6, 8)]))
         })
-        
+
         j[rst_msk == 1] <- NA
-        raster::writeRaster(j, filename = fls_qc3, 
+        raster::writeRaster(j, filename = fls_qc3,
                             format = "GTiff", overwrite = TRUE)
       }
     })
   }
-
-
-# ### monthly value composites ---------------------------------------------------
-#
-# indices <- as.numeric(as.factor(as.yearmon(seq(as.Date("2013-01-01"),
-#                                                as.Date("2013-02-28"), 8))))
-#
-# rst.b1.b2.agg <-
-#   foreach(i = c(1, 2), .packages = lib) %dopar% {
-#     foreach(j = unique(indices), .combine = "stack") %do% {
-#       sub <- rst.b1.b2.cc[[i]][[grep(j, indices)]]
-#       calc(sub, fun = function(x) {
-#         if (all(is.na(x))) return(NA) else return(round(median(x, na.rm = TRUE)))
-#       }, filename = paste0("myd09q1/processed/AGG_", names(sub)[1]),
-#       format = "GTiff", overwrite = TRUE)
-#     }
-#   }
 
 
   ### normalized difference vegetation index -----------------------------------
@@ -267,10 +249,8 @@ lst <- lapply(c("MOD09GQ", "MYD09GQ"), function(product) {
   if (all(file.exists(fls_ndvi_out))) {
     rst_ndvi <- raster::stack(fls_ndvi_out)
   } else {
-    rst_ndvi <- ndvi(lst_qc3[[1]], lst_qc3[[2]],
-                     filename = paste0(dir_ndvi, "/NDVI"),
-                     format = "GTiff", overwrite = TRUE,
-                     bylayer = TRUE, suffix = fls_ndvi)
+    rst_ndvi <- ndvi(lst_qc3[[1]], lst_qc3[[2]], cores = 3L,
+                     filename = fls_ndvi_out, format = "GTiff", overwrite = TRUE)
   }
   
 
@@ -285,10 +265,8 @@ lst <- lapply(c("MOD09GQ", "MYD09GQ"), function(product) {
   if (all(file.exists(fls_savi_out))) {
     rst_savi <- raster::stack(fls_savi_out)
   } else {
-    rst_savi <- savi(lst_qc3[[1]], lst_qc3[[2]],
-                   filename = paste0(dir_savi, "/SAVI"),
-                   format = "GTiff", overwrite = TRUE,
-                   bylayer = TRUE, suffix = fls_savi)
+    rst_savi <- savi(lst_qc3[[1]], lst_qc3[[2]], cores = 3L, 
+                     filename = fls_savi_out, format = "GTiff", overwrite = TRUE)
   }
   
   return(list(rst_ndvi, rst_savi))
