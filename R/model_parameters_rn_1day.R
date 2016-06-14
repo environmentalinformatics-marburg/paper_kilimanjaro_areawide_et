@@ -4,7 +4,7 @@
 rm(list = ls(all = TRUE))
 
 ## load packages
-lib <- c("raster", "reset", "satellite", "doParallel")
+lib <- c("raster", "reset", "satellite", "doParallel", "MODIS")
 Orcs::loadPkgs(lib)
 
 ## set working directory
@@ -300,7 +300,6 @@ dat_lst <- data.frame(datetime = dts_lst, lst = fls_lst_res,
 ## ndvi
 fls_ndvi <- list.files("data/MCD09GQ.006/ndvi", full.names = TRUE, 
                        pattern = "^NDVI_MCD09GQ.*.tif$")
-rst_ndvi <- stack(fls_ndvi)
 
 dts_ndvi <- substr(basename(fls_ndvi), 15, 21)
 dat_ndvi <- data.frame(datetime = dts_ndvi, ndvi = fls_ndvi, 
@@ -313,7 +312,6 @@ fls_lai <- list.files("data/MCD15A3H.006/rpl", full.names = TRUE,
 dts_lai <- extractDate(fls_lai, 11, 17)$inputLayerDates
 id <- which(!dts_lai %in% dts_ndvi)
 fls_lai <- fls_lai[-id]
-rst_lai <- stack(fls_lai)
 
 fls_lai_res <- gsub("/rpl/", "/res/", fls_lai)
 dir_lai_res <- unique(dirname(fls_lai_res))
@@ -466,19 +464,23 @@ dir_rn <- unique(dirname(fls_rn))
 if (!dir.exists(dir_rn)) dir.create(dir_rn)
 
 lst_rn <- foreach(i = 1:nrow(dat_rn), .packages = lib) %dopar% {
-  rsd <- raster(dat_rn$swdr[i])
-  rsd <- projectRaster(rsd, crs = "+init=epsg:21037")
-  rsd <- resample(rsd, rst_ref_utm)
-  
-  rsu <- raster(dat_rn$swur[i])
-  
-  es <- raster(dat_rn$emis_surf[i])
-  rld <- raster(dat_rn$lwdr[i])
-  
-  rlu <- raster(dat_rn$lwur[i])
-  
-  netRadiation(rsd, rsu, rld, es, rlu, filename = fls_rn[i], 
-               format = "GTiff", overwrite = TRUE)
+  if (file.exists(fls_rn[i])) {
+    raster(fls_rn[i])
+  } else {
+    rsd <- raster(dat_rn$swdr[i])
+    rsd <- projectRaster(rsd, crs = "+init=epsg:21037")
+    rsd <- resample(rsd, rst_ref_utm)
+    
+    rsu <- raster(dat_rn$swur[i])
+    
+    es <- raster(dat_rn$emis_surf[i])
+    rld <- raster(dat_rn$lwdr[i])
+    
+    rlu <- raster(dat_rn$lwur[i])
+    
+    netRadiation(rsd, rsu, rld, es, rlu, filename = fls_rn[i], 
+                 format = "GTiff", overwrite = TRUE)
+  }
 }
 
 rst_rn <- stack(lst_rn)
