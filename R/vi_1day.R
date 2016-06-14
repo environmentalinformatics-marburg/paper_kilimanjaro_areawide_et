@@ -276,8 +276,7 @@ lst <- lapply(c("MOD09GQ", "MYD09GQ"), function(product) {
 ### gap-filling ----------------------------------------------------------------
 
 lst_fill <- foreach(i = list(lst[[1]][[1]], lst[[2]][[1]], lst[[1]][[2]], lst[[2]][[2]]), 
-                    j = list(lst[[2]][[1]], lst[[1]][[1]], lst[[2]][[2]], lst[[1]][[2]]), 
-                    .packages = c("raster", "foreach")) %dopar% {
+                    j = list(lst[[2]][[1]], lst[[1]][[1]], lst[[2]][[2]], lst[[1]][[2]])) %do% {
                       
   dir_fill <- paste0(dirname(attr(i[[1]], "file")@name), "/gf")
   if (!dir.exists(dir_fill)) dir.create(dir_fill)
@@ -318,32 +317,30 @@ lst_fill <- foreach(i = list(lst[[1]][[1]], lst[[2]][[1]], lst[[1]][[2]], lst[[2
 
 ### combined products ----------------------------------------------------------
 
-dir_cmb <- "data/MCD09Q1.006"
+dir_cmb <- "data/MCD09GQ.006"
 if (!dir.exists(dir_cmb)) dir.create(dir_cmb)
 
 ## ndvi
-fls_cmb_ndvi <- gsub("MOD09Q1", "MCD09Q1", names(lst_fill[[1]]))
-fls_cmb_ndvi <- gsub("NDVI_", "", fls_cmb_ndvi)
+fls_cmb_ndvi <- gsub("MOD09GQ", "MCD09GQ", names(lst_fill[[1]]))
 dir_cmb_ndvi <- paste0(dir_cmb, "/ndvi")
+fls_cmb_ndvi <- paste0(dir_cmb_ndvi, "/", fls_cmb_ndvi, ".tif")
 if (!dir.exists(dir_cmb_ndvi)) dir.create(dir_cmb_ndvi)
 
-rst_ndvi_cmb <- overlay(lst_fill[[1]], lst_fill[[2]], 
-                        fun = function(...) max(..., na.rm = TRUE), 
-                        unstack = TRUE, filename = paste0(dir_cmb_ndvi, "/NDVI"), 
-                        bylayer = TRUE, suffix = fls_cmb_ndvi, format = "GTiff", 
-                        overwrite = TRUE)
+lst_cmb_ndvi <- foreach(i = 1:nlayers(lst_fill[[1]]), .packages = lib) %dopar%
+  overlay(lst_fill[[1]][[i]], lst_fill[[2]][[i]], 
+          fun = function(...) max(..., na.rm = TRUE), 
+          filename = fls_cmb_ndvi[i], format = "GTiff", overwrite = TRUE)
 
 ## savi
-fls_cmb_savi <- gsub("MOD09Q1", "MCD09Q1", names(lst_fill[[3]]))
-fls_cmb_savi <- gsub("SAVI_", "", fls_cmb_savi)
+fls_cmb_savi <- gsub("MOD09GQ", "MCD09GQ", names(lst_fill[[3]]))
 dir_cmb_savi <- paste0(dir_cmb, "/savi")
+fls_cmb_savi <- paste0(dir_cmb_savi, "/", fls_cmb_savi, ".tif")
 if (!dir.exists(dir_cmb_savi)) dir.create(dir_cmb_savi)
 
-rst_savi_cmb <- overlay(lst_fill[[3]], lst_fill[[4]], 
-                        fun = function(...) max(..., na.rm = TRUE), 
-                        unstack = TRUE, filename = paste0(dir_cmb_savi, "/SAVI"), 
-                        bylayer = TRUE, suffix = fls_cmb_savi, format = "GTiff", 
-                        overwrite = TRUE)
+lst_cmb_savi <- foreach(i = 1:nlayers(lst_fill[[3]]), .packages = lib) %dopar%
+  overlay(lst_fill[[3]][[i]], lst_fill[[4]][[i]], 
+          fun = function(...) max(..., na.rm = TRUE), 
+          filename = fls_cmb_savi[i], format = "GTiff", overwrite = TRUE)
 
 ## deregister parallel backend
 stopCluster(cl)
