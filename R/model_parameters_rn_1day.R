@@ -95,7 +95,7 @@ dir_tau <- paste0(dir_sensor, "/Atmospheric_Transmissivity")
 if (!dir.exists(dir_tau)) dir.create(dir_tau)
 fls_tau <- paste0(dir_tau, "/", basename(fls_tau))
 
-rst_tau <- foreach(i = 1:nrow(dat_tau), .packages = lib) %dopar% {
+lst_tau <- foreach(i = 1:nrow(dat_tau), .packages = lib) %dopar% {
   if (file.exists(fls_tau[i])) {
     raster(fls_tau[i])
   } else {
@@ -202,7 +202,7 @@ if (!dir.exists(dir_rsd)) dir.create(dir_rsd)
 fls_rsd <- paste0(dir_rsd, "/", basename(fls_rsd))
 
 ## compute per-scene shortwave downward radiation
-lst_rsd <- foreach(i = 1:nrow(dat_rsd), .packages = lib) %dopar% {
+rst_rsd <- stack(foreach(i = 1:nrow(dat_rsd), .packages = lib) %dopar% {
   if (file.exists(fls_rsd[i])) {
     raster::raster(fls_rsd[i])
   } else {
@@ -213,8 +213,8 @@ lst_rsd <- foreach(i = 1:nrow(dat_rsd), .packages = lib) %dopar% {
     writeRaster(rst, filename = fls_rsd[i], 
                         format = "GTiff", overwrite = TRUE)  
   }
-}
-rst_rsd <- stack(lst_rsd); rm(lst_rsd)
+})
+
 dat_rsd$swdr <- fls_rsd
 
 
