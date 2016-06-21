@@ -165,8 +165,8 @@ if (!dir.exists(dir_adj)) dir.create(dir_adj)
 # rst_adj <- stack(lst_adj)
 
 ## reimport step #3 quality-controlled files
-fls_qc3 <- list.files(dir_qc3, pattern = "Lai_500m.tif$", full.names = TRUE)
-rst_qc3 <- raster::stack(fls_qc3)
+fls_adj <- list.files(dir_adj, pattern = "Lai_500m.tif$", full.names = TRUE)
+rst_adj <- stack(fls_adj)
 
 
 ### gap-filling ----------------------------------------------------------------
@@ -174,18 +174,35 @@ rst_qc3 <- raster::stack(fls_qc3)
 
 mat_adj <- as.matrix(rst_adj)
 
-mat_gf <- t(apply(mat_adj, 1, FUN = function(x) kza(x, m = 5)$kz))
-rst_gf <- setValues(rst_adj, mat_gf)
+mat_fll <- foreach(i = 1:nrow(mat_adj), .combine = "rbind") %do% {
+  val <- mat_adj[i, ]
+  
+  if (!all(is.na(val))) {
+    
+    id <- is.na(val)
+    id_vld <- which(!id); id_inv <- which(id)
+    
+    while(length(id_inv) > 0) {
+      val[id_inv] <- kza(val, m = 3)$kz[id_inv]
+      
+      id <- is.na(val)
+      id_vld <- which(!id); id_inv <- which(id)
+    }
+  }
+  
+  return(val)
+}
+
+rst_fll <- setValues(rst_adj, mat_fll)
 
 dir_gf <- "data/MCD15A3H.006/gf"
 if (!dir.exists(dir_gf)) dir.create(dir_gf)
 
-lst_gf <- foreach(i = unstack(rst_gf), j = unstack(rst_adj), 
-                  .packages = "raster") %dopar% 
-  raster::writeRaster(i, filename = paste(dir_gf, names(j), sep = "/"), 
-                      format = "GTiff", overwrite = TRUE)
-
-rst_gf <- stack(lst_gf)
+rst_fll <- stack(foreach(i = 1:nlayers(rst_fll), .packages = lib) %dopar% {
+  writeRaster(rst_fll[[i]], 
+              filename = paste0(dir_gf, "/", names(rst_fll[[i]]), ".tif"), 
+              format = "GTiff", overwrite = TRUE)
+})
 
 
 ### replicate missing dates -----
@@ -193,10 +210,10 @@ rst_gf <- stack(lst_gf)
 dts <- seq(as.Date("2013-01-01"), as.Date("2015-12-31"), 1)
 dts <- strftime(dts, format = "%Y%j")
 
-dts_gf <- extractDate(names(rst_gf), 11, 17)$inputLayerDates
+dts_gf <- extractDate(names(rst_fll), 11, 17)$inputLayerDates
 
 dat_rpl <- merge(data.frame(date = dts), 
-                 data.frame(date = dts_gf, file = names(rst_gf)), 
+                 data.frame(date = dts_gf, file = names(rst_fll)), 
                  by = "date", all.x = TRUE)
 
 ## replicate available files
@@ -220,12 +237,10 @@ fls_rpl_out <- sapply(1:nrow(dat_rpl), function(i) {
 fls_rpl_out <- paste0(dir_rpl, "/", fls_rpl_out, ".tif")
 
 ## write to files
-lst_rpl <- foreach(i = 1:nlayers(rst_rpl), j = fls_rpl_out, 
+rst_rpl <- stack(foreach(i = 1:nlayers(rst_rpl), j = fls_rpl_out, 
                    .packages = "raster") %dopar% {
   writeRaster(rst_rpl[[i]], filename = j, format = "GTiff", overwrite = TRUE)
-}
-
-rst_rpl <- stack(lst_rpl)
+})
 
 ## close parallel backend
 stopCluster(cl)
