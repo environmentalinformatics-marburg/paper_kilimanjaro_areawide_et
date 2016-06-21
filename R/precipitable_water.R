@@ -201,8 +201,3 @@ lst_res <- foreach(product = c("MOD05_L2.006", "MYD05_L2.006")) %do% {
   })
 }
   
-
-### processing: daily composites -----
-
-dts_pwc <- extractDate(names(lst_res[[1]]), 19, 25)$inputLayerDates
-dts_dpl <- names(which(table(dts_pwc) == 2))
