@@ -20,7 +20,7 @@ rst_ref_utm <- raster("data/MYD09Q1.006/ndvi/NDVI_MYD09Q1.A2013001.sur_refl.tif"
 rst_ref <- trim(projectRaster(rst_ref_utm, crs = "+init=epsg:4326"))
 
 ## sensor under investigation
-sensor <- "MOD"
+sensor <- "MYD"
 dir_sensor <- paste0("data/radiation/", sensor)
 
 
@@ -38,11 +38,50 @@ dat_theta <- data.frame(datetime = dts_theta, theta = fls_theta,
 fls_ptw <- list.files(paste0("data/", sensor, "05_L2.006/Water_Vapor_Near_Infrared/res"), 
                       full.names = TRUE, pattern = "Near_Infrared.tif$")
 
-# # merge replicate daily scenes
-# dts_ptw <- MODIS::extractDate(fls_ptw, 23, 29, asDate = TRUE)$inputLayerDates
-# fct_ptw <- as.numeric(as.factor(dts_ptw))
-# rst_ptw <- stackApply(rst_ptw, indices = fct_ptw, fun = mean)
-# 
+## merge duplicated daily scenes
+fls_sez <- list.files(paste0("data/", sensor, "05_L2.006/Sensor_Zenith"), 
+                      full.names = TRUE, pattern = "Sensor_Zenith.tif$")
+
+dts_ptw <- extractDate(fls_ptw, 23, 29, asDate = TRUE)$inputLayerDates
+
+dts_dpl <- which(duplicated(dts_ptw))
+
+if (length(dts_dpl) > 0) {
+  lst_ptw <- lapply(dts_dpl, function(i) {
+    fls <- fls_ptw[which(dts_ptw == dts_ptw[i])]
+    rst <- lapply(fls, raster)
+    
+    vld <- suppressWarnings(sapply(rst, maxValue))
+    if (all(is.na(vld))) {
+      rm(rst)
+      file.remove(fls)
+    } else if (sum(is.na(vld)) == 1) {
+      rst <- rst[[which(!is.na(vld))]]
+      file.remove(fls[which(is.na(vld))])
+    } else {
+      rst_sez <- stack(fls_sez[which(dts_ptw == dts_ptw[i])])
+      rst <- overlay(rst[[1]], rst[[2]], rst_sez[[1]], rst_sez[[2]], 
+                     fun = function(w, x, y, z) {
+                       val <- sapply(1:ncell(w), function(j) {
+                         if (is.na(w[j]) & !is.na(x[j])) {
+                           return(x[j])
+                         } else if (!is.na(w[j]) & is.na(x[j])) {
+                           return(w[j])
+                         } else if (!is.na(w[j]) & !is.na(x[j])) {
+                           if (y[j] < z[j]) return(w[j]) else return(x[j])
+                         } else {
+                           return(NA)
+                         }
+                       })
+                     }, filename = fls[which.min(maxValue(rst_sez))], 
+                     format = "GTiff", overwrite = TRUE)
+      file.remove(fls[which.max(maxValue(rst_sez))])
+    }
+    
+    return(rst)
+  })
+}
+
 # dir_dly <- paste0(unique(dirname(fls_ptw)), "/daily/")
 # if (!dir.exists(dir_dly)) dir.create(dir_dly)
 # fls_dly <- paste0(dir_dly, "Surface_Pressure_", strftime(dts_ptw, "%Y%j"), ".tif")
@@ -50,7 +89,7 @@ fls_ptw <- list.files(paste0("data/", sensor, "05_L2.006/Water_Vapor_Near_Infrar
 #   if (file.exists(fls_dly[i])) {
 #     raster(fls_dly[i])
 #   } else {
-#     writeRaster(rst_ptw[[i]], filename = fls_dly[i], 
+#     writeRaster(rst_ptw[[i]], filename = fls_dly[i],
 #                 format = "GTiff", overwrite = TRUE)
 #   }
 # }
@@ -113,6 +152,7 @@ lst_tau <- foreach(i = 1:nrow(dat_tau), .packages = lib) %dopar% {
 }
 
 fls_tau <- list.files(dir_tau, pattern = "Transmissivity.tif", full.names = TRUE)
+dts_tau <- substr(basename(fls_tau), 11, 22)
 rst_tau <- stack(fls_tau); rm(lst_tau)
 dat_tau <- data.frame(datetime = substr(basename(fls_tau), 11, 22), 
                       transmissivity = fls_tau, stringsAsFactors = FALSE)
@@ -120,8 +160,8 @@ dat_tau <- data.frame(datetime = substr(basename(fls_tau), 11, 22),
 
 ### inverse squared earth-sun distance ---
 
-esd <- calcEarthSunDist(strptime(dts_theta, "%Y%j.%H%S"), formula = "Duffie")
-dat_esd <- data.frame(datetime = dts_theta, distance = esd, 
+esd <- calcEarthSunDist(strptime(dts_tau, "%Y%j.%H%S"), formula = "Duffie")
+dat_esd <- data.frame(datetime = dts_tau, distance = esd, 
                       stringsAsFactors = FALSE)
 
 
@@ -298,7 +338,7 @@ dat_lst <- data.frame(datetime = dts_lst, lst = fls_lst_res,
 ### broadband surface emissivity -----
 
 ## ndvi
-fls_ndvi <- list.files("data/MCD09GQ.006/ndvi", full.names = TRUE, 
+fls_ndvi <- list.files("data/MCD09GQ.006/ndvi/gf", full.names = TRUE, 
                        pattern = "^NDVI_MCD09GQ.*.tif$")
 
 dts_ndvi <- substr(basename(fls_ndvi), 15, 21)
