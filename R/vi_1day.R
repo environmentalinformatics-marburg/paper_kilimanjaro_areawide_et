@@ -11,7 +11,7 @@ Orcs::setwdOS(path_lin = "/media/fdetsch/XChange/", path_win = "H:/",
               path_ext = "kilimanjaro/evapotranspiration")
 
 ## load packages
-lib <- c("raster", "MODIS", "Rsenal", "rgdal", "doParallel", "reset")
+lib <- c("raster", "MODIS", "Rsenal", "rgdal", "doParallel", "reset", "kza")
 Orcs::loadPkgs(lib)
 
 ## parallelization
@@ -272,45 +272,66 @@ lst <- lapply(c("MOD09GQ", "MYD09GQ"), function(product) {
   return(list(rst_ndvi, rst_savi))
 })
 
+## remove unavailable layers
+dts_terra <- extractDate(names(lst[[1]][[1]]), 15, 21)$inputLayerDates
+dts_aqua <- extractDate(names(lst[[2]][[1]]), 15, 21)$inputLayerDates
+
+id <- which(!dts_aqua %in% dts_terra)
+lst[[2]][[1]] <- lst[[2]][[1]][[-id]]
+lst[[2]][[2]] <- lst[[2]][[2]][[-id]]
+
 
 ### gap-filling ----------------------------------------------------------------
 
 lst_fill <- foreach(i = list(lst[[1]][[1]], lst[[2]][[1]], lst[[1]][[2]], lst[[2]][[2]]), 
                     j = list(lst[[2]][[1]], lst[[1]][[1]], lst[[2]][[2]], lst[[1]][[2]])) %do% {
                       
+  ## target folder and files                    
   dir_fill <- paste0(dirname(attr(i[[1]], "file")@name), "/gf")
   if (!dir.exists(dir_fill)) dir.create(dir_fill)
   
   fls_fill <- paste0(dir_fill, "/", names(i), ".tif")
   
+  ## if all files exist, import
   if (all(file.exists(fls_fill))) {
-    raster::stack(fls_fill)
-  } else {                      
+    stack(fls_fill)
     
-    mat_resp <- raster::as.matrix(i)
-    mat_pred <- raster::as.matrix(j)
-
-    mat_fill <- foreach(k = 1:nrow(mat_resp), .combine = "rbind") %do% {
-      dat <- data.frame(y = mat_resp[k, ], x = mat_pred[k, ])
+  ## else if file from 2014299 is missing (not available from terra-modis), 
+  ## remove from target files and import  
+  } else {                      
+    id <- which(!file.exists(fls_fill))
+    if (length(id) == 1 & length(grep("2014299", fls_fill[id])) == 1) {
+      fls_fill <- fls_fill[-id]
+      stack(fls_fill)
       
-      if (sum(complete.cases(dat)) >= (.2 * nrow(dat))) {
-        mod <- lm(y ~ x, data = dat)
+    ## else execute gap-filling   
+    } else {
+      
+      mat_resp <- as.matrix(i)
+      mat_pred <- as.matrix(j)
+      
+      mat_fill <- foreach(k = 1:nrow(mat_resp), .combine = "rbind") %do% {
+        dat <- data.frame(y = mat_resp[k, ], x = mat_pred[k, ])
         
-        id <- which(!is.na(dat$x) & is.na(dat$y))
-        newdata <- data.frame(x = dat$x[id])
-        dat$y[id] <- predict(mod, newdata)
+        if (sum(complete.cases(dat)) >= (.2 * nrow(dat))) {
+          mod <- lm(y ~ x, data = dat)
+          
+          id <- which(!is.na(dat$x) & is.na(dat$y))
+          newdata <- data.frame(x = dat$x[id])
+          dat$y[id] <- predict(mod, newdata)
+        }
+        
+        return(dat$y)
       }
       
-      return(dat$y)
+      rst_fill <- setValues(i, mat_fill)
+      
+      lst_fill <- foreach(i = 1:ncol(mat_resp), .packages = "raster") %dopar%
+        writeRaster(rst_fill[[i]], filename = fls_fill[i], 
+                    format = "GTiff", overwrite = TRUE)
+      
+      stack(lst_fill)
     }
-                        
-    rst_fill <- raster::setValues(i, mat_fill)
-    
-    lst_fill <- foreach(i = 1:ncol(mat_resp), .packages = "raster") %dopar%
-      raster::writeRaster(rst_fill[[i]], filename = fls_fill[i], 
-                          format = "GTiff", overwrite = TRUE)
-    
-    raster::stack(lst_fill)
   }
 }
 
@@ -326,10 +347,19 @@ dir_cmb_ndvi <- paste0(dir_cmb, "/ndvi")
 fls_cmb_ndvi <- paste0(dir_cmb_ndvi, "/", fls_cmb_ndvi, ".tif")
 if (!dir.exists(dir_cmb_ndvi)) dir.create(dir_cmb_ndvi)
 
-lst_cmb_ndvi <- foreach(i = 1:nlayers(lst_fill[[1]]), .packages = lib) %dopar%
-  overlay(lst_fill[[1]][[i]], lst_fill[[2]][[i]], 
-          fun = function(...) max(..., na.rm = TRUE), 
-          filename = fls_cmb_ndvi[i], format = "GTiff", overwrite = TRUE)
+lst_cmb_ndvi <- foreach(i = 1:nlayers(lst_fill[[1]]), .packages = lib) %dopar% {
+  ## if file exists, import
+  if (file.exists(fls_cmb_ndvi[i])) {
+    raster(fls_cmb_ndvi[i])
+  ## else create maximum value composites  
+  } else {
+    overlay(lst_fill[[1]][[i]], lst_fill[[2]][[i]], 
+            fun = function(...) max(..., na.rm = TRUE), 
+            filename = fls_cmb_ndvi[i], format = "GTiff", overwrite = TRUE)
+  }
+}
+
+rst_cmb_ndvi <- stack(lst_cmb_ndvi); rm(lst_cmb_ndvi)
 
 ## savi
 fls_cmb_savi <- gsub("MOD09GQ", "MCD09GQ", names(lst_fill[[3]]))
@@ -337,10 +367,91 @@ dir_cmb_savi <- paste0(dir_cmb, "/savi")
 fls_cmb_savi <- paste0(dir_cmb_savi, "/", fls_cmb_savi, ".tif")
 if (!dir.exists(dir_cmb_savi)) dir.create(dir_cmb_savi)
 
-lst_cmb_savi <- foreach(i = 1:nlayers(lst_fill[[3]]), .packages = lib) %dopar%
-  overlay(lst_fill[[3]][[i]], lst_fill[[4]][[i]], 
+lst_cmb_savi <- foreach(i = 1:nlayers(lst_fill[[3]]), .packages = lib) %dopar% {
+  ## if file exists, import
+  if (file.exists(fls_cmb_savi[i])) {
+    raster(fls_cmb_savi[i])
+    ## else create maximum value composites  
+  } else {
+    overlay(lst_fill[[3]][[i]], lst_fill[[4]][[i]], 
           fun = function(...) max(..., na.rm = TRUE), 
           filename = fls_cmb_savi[i], format = "GTiff", overwrite = TRUE)
+  }
+}
+
+rst_cmb_savi <- stack(lst_cmb_savi); rm(lst_cmb_savi)
+
+
+### gap-filling #2
+
+## ndvi
+mat_cmb_ndvi <- as.matrix(rst_cmb_ndvi)
+
+mat_fll_ndvi <- foreach(i = 1:nrow(mat_cmb_ndvi), .combine = "rbind") %do% {
+  val <- mat_cmb_ndvi[i, ]
+  
+  if (!all(is.na(val))) {
+    
+    id <- is.na(val)
+    id_vld <- which(!id); id_inv <- which(id)
+    
+    while(length(id_inv) > 0) {
+      val[id_inv] <- kza(val, m = 3)$kz[id_inv]
+      
+      id <- is.na(val)
+      id_vld <- which(!id); id_inv <- which(id)
+    }
+  }
+  
+  return(val)
+}
+
+rst_fll_ndvi <- setValues(rst_cmb_ndvi, mat_fll_ndvi)
+
+drs_gf <- paste0("data/MCD09GQ.006/ndvi/gf")
+if (!dir.exists(drs_gf)) dir.create(drs_gf)
+
+rst_fll_ndvi <- stack(foreach(i = 1:nlayers(rst_fll_ndvi), 
+                              .packages = "raster") %dopar% {
+  writeRaster(rst_fll_ndvi[[i]], 
+              filename = paste0(drs_gf, "/", names(rst_fll_ndvi[[i]]), ".tif"), 
+              format = "GTiff", overwrite = TRUE)
+})
+
+## savi
+mat_cmb_savi <- as.matrix(rst_cmb_savi)
+
+mat_fll_savi <- foreach(i = 1:nrow(mat_cmb_savi), .combine = "rbind") %do% {
+  val <- mat_cmb_savi[i, ]
+  
+  if (!all(is.na(val))) {
+    
+    id <- is.na(val)
+    id_vld <- which(!id); id_inv <- which(id)
+    
+    while(length(id_inv) > 0) {
+      val[id_inv] <- kza(val, m = 3)$kz[id_inv]
+      
+      id <- is.na(val)
+      id_vld <- which(!id); id_inv <- which(id)
+    }
+  }
+  
+  return(val)
+}
+
+rst_fll_savi <- setValues(rst_cmb_savi, mat_fll_savi)
+
+drs_gf <- paste0("data/MCD09GQ.006/savi/gf")
+if (!dir.exists(drs_gf)) dir.create(drs_gf)
+
+rst_fll_savi <- stack(foreach(i = 1:nlayers(rst_fll_savi), 
+                              .packages = "raster") %dopar% {
+  writeRaster(rst_fll_savi[[i]], 
+              filename = paste0(drs_gf, "/", names(rst_fll_savi[[i]]), ".tif"), 
+              format = "GTiff", overwrite = TRUE)
+})
+
 
 ## deregister parallel backend
 stopCluster(cl)

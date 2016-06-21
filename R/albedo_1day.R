@@ -27,7 +27,7 @@ MODISoptions(localArcPath = "MODIS_ARC", outDirPath = "MODIS_ARC/PROCESSED",
 
 ## combinded terra/aqua product incl. quality layer
 runGdal(product = "MCD43A3", collection = "006", job = "MCD43A3.006", 
-        begin = "2013001", end = "2015365", tileH = 21, tileV = 9,
+        begin = "2015011", end = "2015365", tileH = 21, tileV = 9,
         SDSstring = paste(c(rep(0, 9), 1, rep(0, 19), 1), collapse = ""))
 
 
@@ -67,6 +67,41 @@ lst_lyr <- lapply(c("WSA_shortwave", "Quality_shortwave"), function(layer) {
   }
   
   stack(lst_crp)
+})
+
+
+### gap-filling -----
+
+mat_alb <- as.matrix(lst_lyr[[1]])
+
+mat_fll <- foreach(i = 1:nrow(mat_alb), .combine = "rbind") %do% {
+  val <- mat_alb[i, ]
+  
+  if (!all(is.na(val))) {
+    
+    id <- is.na(val)
+    id_vld <- which(!id); id_inv <- which(id)
+    
+    while(length(id_inv) > 0) {
+      val[id_inv] <- kza(val, m = 3)$kz[id_inv]
+      
+      id <- is.na(val)
+      id_vld <- which(!id); id_inv <- which(id)
+    }
+  }
+  
+  return(val)
+}
+
+rst_fll <- setValues(lst_lyr[[1]], mat_fll)
+
+drs_gf <- paste0("data/MCD43A3.006/gf")
+if (!dir.exists(drs_gf)) dir.create(drs_gf)
+
+rst_gf <- stack(foreach(i = 1:nlayers(rst_fll), .packages = "raster") %dopar% {
+  writeRaster(rst_fll[[i]], 
+              filename = paste0(drs_gf, "/", names(rst_fll[[i]]), ".tif"), 
+              format = "GTiff", overwrite = TRUE)
 })
 
 ## close parallel backend
